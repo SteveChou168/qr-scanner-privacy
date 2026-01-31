@@ -162,8 +162,6 @@ class AppText {
   static String get settingsVibrationDesc => _v('掃描成功時震動', 'Vibrate on scan', 'スキャン時に振動', 'Vibrar al escanear', 'Vibrar ao escanear', '스캔 시 진동', 'Rung khi quét');
   static String get settingsSound => _v('掃描音效', 'Sound', 'サウンド', 'Sonido', 'Som', '소리', 'Âm thanh');
   static String get settingsSoundDesc => _v('掃描成功時播放音效', 'Play sound on scan', 'スキャン時にサウンドを再生', 'Sonido al escanear', 'Som ao escanear', '스캔 시 소리', 'Âm thanh khi quét');
-  static String get settingsAutoOpenUrl => _v('自動開啟 URL', 'Auto-open URL', 'URLを自動で開く', 'Abrir URL auto', 'Abrir URL auto', 'URL 자동 열기', 'Tự động mở URL');
-  static String get settingsAutoOpenUrlDesc => _v('掃描到網址時自動開啟', 'Open URLs automatically', 'URLをスキャンしたら自動で開く', 'Abrir URL automáticamente', 'Abrir URL automaticamente', 'URL 스캔 시 자동 열기', 'Tự động mở khi quét URL');
   static String get settingsUseExternalBrowser => _v('使用外部瀏覽器', 'Use External Browser', '外部ブラウザを使用', 'Usar navegador externo', 'Usar navegador externo', '외부 브라우저 사용', 'Dùng trình duyệt ngoài');
   static String get settingsUseExternalBrowserDesc => _v('開啟連結時使用系統預設瀏覽器', 'Open links in system default browser', 'リンクをシステムブラウザで開く', 'Abrir en navegador del sistema', 'Abrir no navegador do sistema', '시스템 브라우저로 열기', 'Mở bằng trình duyệt hệ thống');
   static String get settingsContinuousScan => _v('連續掃描', 'Continuous Scan', '連続スキャン', 'Escaneo continuo', 'Escaneamento contínuo', '연속 스캔', 'Quét liên tục');
@@ -485,9 +483,11 @@ class AppText {
   static String get generatorTitle => _v('QR 碼生成器', 'QR Generator', 'QRコード生成', 'Generador QR', 'Gerador QR', 'QR 생성기', 'Tạo mã QR');
   static String get inputText => _v('輸入文字', 'Enter text', 'テキストを入力', 'Ingrese texto', 'Digite texto', '텍스트 입력', 'Nhập văn bản');
   static String get inputHint => _v('輸入要生成的內容...', 'Enter content to generate...', '生成する内容を入力...', 'Ingrese contenido...', 'Digite conteúdo...', '생성할 내용 입력...', 'Nhập nội dung để tạo...');
+  static String get socialInputHint => _v('輸入用戶名', 'Enter username', 'ユーザー名を入力', 'Nombre de usuario', 'Nome de usuário', '사용자 이름', 'Tên người dùng');
   static String get generateQR => _v('生成 QR 碼', 'Generate QR', 'QRコード生成', 'Generar QR', 'Gerar QR', 'QR 생성', 'Tạo QR');
   static String get saveImage => _v('儲存圖片', 'Save Image', '画像を保存', 'Guardar imagen', 'Salvar imagem', '이미지 저장', 'Lưu ảnh');
   static String get shareQR => _v('分享 QR 碼', 'Share QR', 'QRコードを共有', 'Compartir QR', 'Partilhar QR', 'QR 공유', 'Chia sẻ QR');
+  static String get testLink => _v('測試', 'Test', 'テスト', 'Probar', 'Testar', '테스트', 'Kiểm tra');
   static String get shareNoteHint => _v('加入備註（選填）', 'Add a note (optional)', 'メモを追加（任意）', 'Agregar nota (opcional)', 'Adicionar nota (opcional)', '메모 추가 (선택)', 'Thêm ghi chú (tùy chọn)');
   static String get templateUrl => _v('網址', 'URL', 'URL', 'URL', 'URL', 'URL', 'URL');
   static String get templateWifi => _v('Wi-Fi', 'Wi-Fi', 'Wi-Fi', 'Wi-Fi', 'Wi-Fi', 'Wi-Fi', 'Wi-Fi');
@@ -603,7 +603,7 @@ class AppText {
   // ============ Forge System (Hidden Easter Egg) ============
   static String get forgeStatus => _v('鍛造中', 'FORGING', '鍛造中', 'FORJANDO', 'FORJANDO', '단조 중', 'ĐANG RÈN');
   static String get forgeReady => _v('待機中', 'READY', '待機中', 'LISTO', 'PRONTO', '대기 중', 'SẴN SÀNG');
-  static String get forgeTapToStart => _v('點擊中央開始鍛造', 'Tap center to start forging', '中央をタップして鍛造開始', 'Toca el centro para forjar', 'Toque no centro para forjar', '중앙을 탭하여 단조 시작', 'Chạm vào giữa để bắt đầu rèn');
+  static String get forgeTapToStart => _v('點擊中央開始鍛造，長按取消', 'Tap center to forge, hold to cancel', '中央タップで鍛造、長押しで中止', 'Toca centro para forjar, mantén cancelar', 'Toque centro para forjar, segure cancelar', '중앙 탭으로 단조, 길게 눌러 취소', 'Nhấn giữa để rèn, giữ để hủy');
   static String get forgeInProgress => _v('鍛造進行中...', 'Forging in progress...', '鍛造進行中...', 'Forjando...', 'Forjando...', '단조 진행 중...', 'Đang rèn...');
   static String get forgePaused => _v('已暫停', 'PAUSED', '一時停止', 'PAUSADO', 'PAUSADO', '일시 정지', 'TẠM DỪNG');
   static String get forgeDoubleTapResume => _v('雙擊繼續', 'Double tap to resume', 'ダブルタップで再開', 'Doble toque para continuar', 'Toque duplo para continuar', '더블탭으로 재개', 'Nhấp đúp để tiếp tục');
@@ -619,7 +619,9 @@ class AppText {
   );
   static String get forgeLimitReached => _v('今日鍛造已達上限', 'Daily forge limit reached', '本日の鍛造上限に達しました', 'Límite diario de forja alcanzado', 'Limite diário de forja atingido', '일일 단조 한도 도달', 'Đã đạt giới hạn rèn hôm nay');
   static String get forgeDailyMax => _v('今日已滿', 'MAX TODAY', '本日上限', 'MÁXIMO HOY', 'MÁXIMO HOJE', '오늘 최대', 'TỐI ĐA HÔM NAY');
-  static String get tapToClose => _v('點擊關閉', 'Tap to close', 'タップで閉じる', 'Toca para cerrar', 'Toque para fechar', '탭하여 닫기', 'Nhấn để đóng');
+  static String get forgeCpLabel => _v('⚙️ 鍛造', '⚙️ FORGE', '⚙️ 鍛造', '⚙️ FORJA', '⚙️ FORJA', '⚙️ 단조', '⚙️ RÈN');
+  static String get forgeHint => _v('專注 15 分鐘，注入 0.2 CP', '15 min focus → +0.2 CP', '15分集中 → +0.2 CP', '15 min enfoque → +0.2 CP', '15 min foco → +0.2 CP', '15분 집중 → +0.2 CP', '15 phút tập trung → +0.2 CP');
+  static String get tapToClose => _v('點擊空白處關閉', 'Tap anywhere to close', 'タップで閉じる', 'Toca afuera para cerrar', 'Toque fora para fechar', '빈 곳 탭하여 닫기', 'Nhấn chỗ trống để đóng');
 
   // ============ Rewards System ============
   static String get rewardsTitle => _v('獎勵收藏', 'Rewards', '報酬', 'Recompensas', 'Recompensas', '보상', 'Phần thưởng');

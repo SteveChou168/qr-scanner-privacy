@@ -19,6 +19,7 @@ import '../services/ad_service.dart';
 import '../services/barcode_parser.dart';
 import '../utils/app_constants.dart';
 import '../utils/snackbar_helper.dart';
+import '../utils/url_launcher_helper.dart';
 import '../data/social_media_options.dart';
 import '../data/info_type_options.dart';
 import '../data/models/scan_record.dart';
@@ -377,6 +378,28 @@ class _GeneratorScreenState extends State<GeneratorScreen>
     }
   }
 
+  /// 測試社群連結（不扣次數）
+  Future<void> _testSocialLink() async {
+    if (_selectedSocialMedia == null) return;
+
+    final input = _textController.text.trim();
+    if (input.isEmpty) {
+      SnackbarHelper.showError(context, AppText.generatorEmpty);
+      return;
+    }
+
+    final url = _selectedSocialMedia!.buildContent(input);
+    final settings = context.read<SettingsProvider>();
+    final success = await UrlLauncherHelper.openUrl(
+      url,
+      useExternalBrowser: settings.useExternalBrowser,
+    );
+
+    if (!success && mounted) {
+      SnackbarHelper.showError(context, AppText.urlOpenFailed);
+    }
+  }
+
   Future<void> _saveQRImage() async {
     final canProceed = await _checkQuotaAndShowAd();
     if (!canProceed) return;
@@ -669,9 +692,11 @@ class _GeneratorScreenState extends State<GeneratorScreen>
   /// 鐵灰色（用於深色品牌在暗色模式的輸入欄位圖標）
   static const _darkModeIconColor = Color(0xFFB0B0B0);
 
-  /// 檢查顏色是否太暗（亮度低於閾值）
+  /// 檢查顏色是否太暗（接近純黑）
   bool _isDarkColor(Color c) {
-    return c.computeLuminance() < 0.15;
+    // 閾值 0.05：只有接近純黑的顏色才視為太暗
+    // 避免飽和藍/紫色（如 LinkedIn、Discord）被誤判
+    return c.computeLuminance() < 0.05;
   }
 
   Widget _buildInputFields(ColorScheme colorScheme) {
@@ -688,15 +713,26 @@ class _GeneratorScreenState extends State<GeneratorScreen>
         controller: _textController,
         decoration: InputDecoration(
           labelText: _selectedSocialMedia!.name,
-          hintText: _selectedSocialMedia!.hint,
+          hintText: AppText.socialInputHint,
           border: const OutlineInputBorder(),
-          prefixIcon: Padding(
-            padding: const EdgeInsets.all(12),
-            child: FaIcon(
-              _selectedSocialMedia!.icon,
-              color: iconColor,
-              size: 20,
-            ),
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+          prefix: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FaIcon(
+                _selectedSocialMedia!.icon,
+                color: iconColor,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _selectedSocialMedia!.displayPrefix,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 14,
+                ),
+              ),
+            ],
           ),
         ),
         maxLines: 1,
@@ -901,6 +937,16 @@ class _GeneratorScreenState extends State<GeneratorScreen>
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 測試按鈕（僅社群 TAB 顯示）
+            if (_currentTab == _GeneratorTab.social) ...[
+              _ActionIconButton(
+                icon: Icons.open_in_new_rounded,
+                label: AppText.testLink,
+                onTap: _testSocialLink,
+                colorScheme: colorScheme,
+              ),
+              const SizedBox(height: 12),
+            ],
             // 儲存按鈕
             _ActionIconButton(
               icon: Icons.save_alt_rounded,
@@ -1046,7 +1092,7 @@ class _GeneratorScreenState extends State<GeneratorScreen>
       'text' => AppText.inputHint,
       'url' => 'example.com',
       'email' => 'user@example.com',
-      'phone' => '+886 912 345 678',
+      'phone' => '',
       _ => AppText.inputHint,
     };
   }

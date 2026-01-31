@@ -28,6 +28,17 @@ class SocialMediaOption {
     if (input.isEmpty) return '';
     return '$prefix$input$suffix';
   }
+
+  /// 取得簡短的 prefix 顯示文字（用於輸入框前綴）
+  /// 例如：https://www.tiktok.com/@ → tiktok.com/@
+  String get displayPrefix {
+    var display = prefix;
+    // 移除 protocol
+    display = display.replaceFirst(RegExp(r'^https?://'), '');
+    // 移除 www.
+    display = display.replaceFirst(RegExp(r'^www\.'), '');
+    return display;
+  }
 }
 
 /// 根據語系取得社交媒體選項列表
@@ -84,8 +95,8 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       name: 'LINE',
       icon: FontAwesomeIcons.line,
       color: const Color(0xFF00C300),
-      prefix: 'https://line.me/ti/p/',
-      hint: '好友連結代碼',
+      prefix: 'https://line.me/ti/p/~',
+      hint: '你的 LINE ID',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -93,7 +104,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'FB ID / Username',
+      hint: 'facebook.com/your.name',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -101,7 +112,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'IG 帳號',
+      hint: 'instagram.com/your_name',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -109,7 +120,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: '頻道 Handle',
+      hint: 'youtube.com/@channel',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -117,7 +128,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'TikTok 帳號',
+      hint: 'tiktok.com/@name',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -125,7 +136,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Threads 帳號',
+      hint: 'threads.net/@name',
     ),
     SocialMediaOption(
       id: 'dcard',
@@ -133,7 +144,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.graduationCap,
       color: const Color(0xFF006AA6),
       prefix: 'https://www.dcard.tw/@',
-      hint: 'Dcard 卡稱',
+      hint: 'dcard.tw/@卡稱',
     ),
     SocialMediaOption(
       id: 'telegram',
@@ -141,7 +152,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.telegram,
       color: const Color(0xFF0088CC),
       prefix: 'https://t.me/',
-      hint: 'Telegram 帳號',
+      hint: 't.me/username',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -149,7 +160,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'X 帳號',
+      hint: 'x.com/username',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -157,7 +168,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'LinkedIn ID',
+      hint: 'in/your-name',
     ),
   ],
 
@@ -171,8 +182,8 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       name: 'LINE',
       icon: FontAwesomeIcons.line,
       color: const Color(0xFF00C300),
-      prefix: 'https://line.me/ti/p/',
-      hint: '友だちリンクコード',
+      prefix: 'https://line.me/ti/p/~',
+      hint: 'あなたの LINE ID',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -180,7 +191,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'X ID',
+      hint: 'x.com/username',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -188,7 +199,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'IG ID',
+      hint: 'instagram.com/name',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -196,7 +207,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: 'チャンネル',
+      hint: 'youtube.com/@channel',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -204,7 +215,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'TikTok ID',
+      hint: 'tiktok.com/@name',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -212,7 +223,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Threads ID',
+      hint: 'threads.net/@name',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -220,7 +231,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'FB ID',
+      hint: 'facebook.com/name',
     ),
     SocialMediaOption(
       id: 'ameba',
@@ -228,7 +239,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.penNib,
       color: const Color(0xFF2D8C3C),
       prefix: 'https://ameblo.jp/',
-      hint: 'Ameba ID',
+      hint: 'ameblo.jp/name',
     ),
     SocialMediaOption(
       id: 'pinterest',
@@ -236,7 +247,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.pinterest,
       color: const Color(0xFFE60023),
       prefix: 'https://www.pinterest.com/',
-      hint: 'Pinterest ID',
+      hint: 'pinterest.com/name',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -244,7 +255,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'LinkedIn ID',
+      hint: 'in/your-name',
     ),
   ],
 
@@ -259,7 +270,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.comment,
       color: const Color(0xFFFEE500),
       prefix: 'https://open.kakao.com/o/',
-      hint: 'OpenChat Link',
+      hint: 'open.kakao.com/o/code',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -267,7 +278,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: '채널',
+      hint: 'youtube.com/@channel',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -275,7 +286,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'IG ID',
+      hint: 'instagram.com/name',
     ),
     SocialMediaOption(
       id: 'naver_blog',
@@ -283,7 +294,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.newspaper,
       color: const Color(0xFF03C75A),
       prefix: 'https://blog.naver.com/',
-      hint: 'Naver ID',
+      hint: 'blog.naver.com/id',
     ),
     SocialMediaOption(
       id: 'naver_cafe',
@@ -291,7 +302,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.mugSaucer,
       color: const Color(0xFF03C75A),
       prefix: 'https://cafe.naver.com/',
-      hint: 'Cafe ID',
+      hint: 'cafe.naver.com/name',
     ),
     SocialMediaOption(
       id: 'band',
@@ -299,7 +310,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.users,
       color: const Color(0xFF42C86A),
       prefix: 'https://band.us/n/',
-      hint: 'Band ID',
+      hint: 'band.us/n/code',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -307,7 +318,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Threads ID',
+      hint: 'threads.net/@name',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -315,7 +326,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'FB ID',
+      hint: 'facebook.com/name',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -323,7 +334,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'TikTok ID',
+      hint: 'tiktok.com/@name',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -331,7 +342,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'X ID',
+      hint: 'x.com/username',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -339,7 +350,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'LinkedIn ID',
+      hint: 'in/your-name',
     ),
     SocialMediaOption(
       id: 'pinterest',
@@ -347,7 +358,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.pinterest,
       color: const Color(0xFFE60023),
       prefix: 'https://www.pinterest.com/',
-      hint: 'Pinterest ID',
+      hint: 'pinterest.com/name',
     ),
   ],
 
@@ -362,7 +373,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: 'Channel Handle',
+      hint: 'youtube.com/@channel',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -370,7 +381,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'FB ID',
+      hint: 'facebook.com/name',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -378,7 +389,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'IG ID',
+      hint: 'instagram.com/name',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -386,7 +397,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'TikTok ID',
+      hint: 'tiktok.com/@name',
     ),
     SocialMediaOption(
       id: 'snapchat',
@@ -394,7 +405,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.snapchat,
       color: const Color(0xFFFFFC00),
       prefix: 'https://www.snapchat.com/add/',
-      hint: 'Username',
+      hint: 'snapchat.com/add/name',
     ),
     SocialMediaOption(
       id: 'twitch',
@@ -402,7 +413,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.twitch,
       color: const Color(0xFF9146FF),
       prefix: 'https://www.twitch.tv/',
-      hint: 'Channel Name',
+      hint: 'twitch.tv/channel',
     ),
     SocialMediaOption(
       id: 'reddit',
@@ -410,7 +421,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.reddit,
       color: const Color(0xFFFF4500),
       prefix: 'https://www.reddit.com/user/',
-      hint: 'Username',
+      hint: 'reddit.com/user/name',
     ),
     SocialMediaOption(
       id: 'whatsapp',
@@ -418,7 +429,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.whatsapp,
       color: const Color(0xFF25D366),
       prefix: 'https://wa.me/',
-      hint: 'Phone (w/ Country Code)',
+      hint: 'e.g. 14155551234',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -426,7 +437,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'X ID',
+      hint: 'x.com/username',
     ),
     SocialMediaOption(
       id: 'discord',
@@ -434,7 +445,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.discord,
       color: const Color(0xFF5865F2),
       prefix: 'https://discord.gg/',
-      hint: 'Invite Code',
+      hint: 'discord.gg/code',
     ),
     SocialMediaOption(
       id: 'pinterest',
@@ -442,7 +453,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.pinterest,
       color: const Color(0xFFE60023),
       prefix: 'https://www.pinterest.com/',
-      hint: 'Username',
+      hint: 'pinterest.com/name',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -450,7 +461,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'Profile ID',
+      hint: 'in/your-name',
     ),
   ],
 
@@ -465,7 +476,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.whatsapp,
       color: const Color(0xFF25D366),
       prefix: 'https://wa.me/',
-      hint: 'Teléfono',
+      hint: 'ej. 34612345678',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -473,7 +484,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'Usuario',
+      hint: 'instagram.com/nombre',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -481,7 +492,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'Usuario',
+      hint: 'facebook.com/nombre',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -489,7 +500,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'Usuario',
+      hint: 'tiktok.com/@nombre',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -497,7 +508,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: 'Canal',
+      hint: 'youtube.com/@canal',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -505,7 +516,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Usuario',
+      hint: 'threads.net/@nombre',
     ),
     SocialMediaOption(
       id: 'twitch',
@@ -513,7 +524,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.twitch,
       color: const Color(0xFF9146FF),
       prefix: 'https://www.twitch.tv/',
-      hint: 'Canal',
+      hint: 'twitch.tv/canal',
     ),
     SocialMediaOption(
       id: 'telegram',
@@ -521,7 +532,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.telegram,
       color: const Color(0xFF0088CC),
       prefix: 'https://t.me/',
-      hint: 'Usuario',
+      hint: 't.me/usuario',
     ),
     SocialMediaOption(
       id: 'discord',
@@ -529,7 +540,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.discord,
       color: const Color(0xFF5865F2),
       prefix: 'https://discord.gg/',
-      hint: 'Código de invitación',
+      hint: 'discord.gg/código',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -537,7 +548,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'Usuario',
+      hint: 'x.com/usuario',
     ),
     SocialMediaOption(
       id: 'pinterest',
@@ -545,7 +556,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.pinterest,
       color: const Color(0xFFE60023),
       prefix: 'https://www.pinterest.com/',
-      hint: 'Usuario',
+      hint: 'pinterest.com/nombre',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -553,7 +564,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'Perfil ID',
+      hint: 'in/tu-nombre',
     ),
   ],
 
@@ -568,7 +579,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.whatsapp,
       color: const Color(0xFF25D366),
       prefix: 'https://wa.me/',
-      hint: 'Telefone',
+      hint: 'ex. 5511912345678',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -576,7 +587,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'Usuário',
+      hint: 'instagram.com/nome',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -584,7 +595,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'Usuário',
+      hint: 'facebook.com/nome',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -592,7 +603,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'Usuário',
+      hint: 'tiktok.com/@nome',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -600,7 +611,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: 'Canal',
+      hint: 'youtube.com/@canal',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -608,7 +619,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Usuário',
+      hint: 'threads.net/@nome',
     ),
     SocialMediaOption(
       id: 'kwai',
@@ -616,7 +627,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.video,
       color: const Color(0xFFFF8F1C),
       prefix: 'https://www.kwai.com/@',
-      hint: 'Usuário / ID',
+      hint: 'kwai.com/@nome',
     ),
     SocialMediaOption(
       id: 'twitch',
@@ -624,7 +635,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.twitch,
       color: const Color(0xFF9146FF),
       prefix: 'https://www.twitch.tv/',
-      hint: 'Canal',
+      hint: 'twitch.tv/canal',
     ),
     SocialMediaOption(
       id: 'telegram',
@@ -632,7 +643,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.telegram,
       color: const Color(0xFF0088CC),
       prefix: 'https://t.me/',
-      hint: 'Usuário',
+      hint: 't.me/usuario',
     ),
     SocialMediaOption(
       id: 'discord',
@@ -640,7 +651,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.discord,
       color: const Color(0xFF5865F2),
       prefix: 'https://discord.gg/',
-      hint: 'Código de convite',
+      hint: 'discord.gg/código',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -648,7 +659,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'Usuário',
+      hint: 'x.com/usuario',
     ),
     SocialMediaOption(
       id: 'pinterest',
@@ -656,7 +667,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.pinterest,
       color: const Color(0xFFE60023),
       prefix: 'https://www.pinterest.com/',
-      hint: 'Usuário',
+      hint: 'pinterest.com/nome',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -664,7 +675,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'Perfil ID',
+      hint: 'in/seu-nome',
     ),
   ],
 
@@ -679,7 +690,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.commentDots,
       color: const Color(0xFF0068FF),
       prefix: 'https://zalo.me/',
-      hint: 'Số điện thoại',
+      hint: 'vd. 84912345678',
     ),
     SocialMediaOption(
       id: 'facebook',
@@ -687,7 +698,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebook,
       color: const Color(0xFF1877F2),
       prefix: 'https://www.facebook.com/',
-      hint: 'Tên người dùng',
+      hint: 'facebook.com/ten',
     ),
     SocialMediaOption(
       id: 'messenger',
@@ -695,7 +706,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.facebookMessenger,
       color: const Color(0xFF00B2FF),
       prefix: 'https://m.me/',
-      hint: 'Tên người dùng',
+      hint: 'm.me/ten',
     ),
     SocialMediaOption(
       id: 'youtube',
@@ -703,7 +714,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.youtube,
       color: const Color(0xFFFF0000),
       prefix: 'https://www.youtube.com/@',
-      hint: 'Kênh',
+      hint: 'youtube.com/@kenh',
     ),
     SocialMediaOption(
       id: 'tiktok',
@@ -711,7 +722,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.tiktok,
       color: Colors.black,
       prefix: 'https://www.tiktok.com/@',
-      hint: 'ID TikTok',
+      hint: 'tiktok.com/@ten',
     ),
     SocialMediaOption(
       id: 'threads',
@@ -719,7 +730,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.threads,
       color: Colors.black,
       prefix: 'https://www.threads.net/@',
-      hint: 'Tên người dùng',
+      hint: 'threads.net/@ten',
     ),
     SocialMediaOption(
       id: 'instagram',
@@ -727,7 +738,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.instagram,
       color: const Color(0xFFE4405F),
       prefix: 'https://www.instagram.com/',
-      hint: 'Tên người dùng',
+      hint: 'instagram.com/ten',
     ),
     SocialMediaOption(
       id: 'telegram',
@@ -735,7 +746,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.telegram,
       color: const Color(0xFF0088CC),
       prefix: 'https://t.me/',
-      hint: 'Tên người dùng',
+      hint: 't.me/username',
     ),
     SocialMediaOption(
       id: 'viber',
@@ -743,7 +754,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.viber,
       color: const Color(0xFF7360F2),
       prefix: 'https://viber.click/',
-      hint: 'Số điện thoại',
+      hint: 'vd. 84912345678',
     ),
     SocialMediaOption(
       id: 'twitter',
@@ -751,7 +762,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.xTwitter,
       color: Colors.black,
       prefix: 'https://x.com/',
-      hint: 'X ID',
+      hint: 'x.com/username',
     ),
     SocialMediaOption(
       id: 'linkedin',
@@ -759,7 +770,7 @@ final Map<String, List<SocialMediaOption>> _localizedSocialMedia = {
       icon: FontAwesomeIcons.linkedin,
       color: const Color(0xFF0A66C2),
       prefix: 'https://www.linkedin.com/in/',
-      hint: 'LinkedIn ID',
+      hint: 'in/ten-cua-ban',
     ),
   ],
 };
