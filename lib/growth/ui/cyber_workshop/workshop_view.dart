@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../../app_text.dart';
 import '../../data/cyber_part.dart';
@@ -26,7 +28,7 @@ class CyberWorkshopView extends StatefulWidget {
 }
 
 class _CyberWorkshopViewState extends State<CyberWorkshopView>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // Timer state
   static const int forgeDurationSeconds = 15 * 60; // 15 minutes
   Timer? _timer;
@@ -40,19 +42,52 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   late AnimationController _glowAnimController;
   late AnimationController _completeAnimController;
 
+  // 30fps optimization for background/emojis (saves ~50% battery)
+  Timer? _backgroundTimer;
+  double _backgroundAnimValue = 0.0;
+  static const _backgroundFrameInterval = 33; // ~30fps in ms
+
   // Floating emojis
   final List<_FloatingEmoji> _floatingEmojis = [];
   static const List<String> _forgeEmojis = [
     '⚙️', '🔧', '🔩', '⛓️', '🔨', '🛠️', '⚡', '🔥',
   ];
 
+  // Gravity lock (easter egg within easter egg)
+  bool _isGravityLocked = false;
+  double _deviceAngle = 0.0;
+  Orientation? _lockedOrientation; // Remember orientation when locked
+  StreamSubscription<AccelerometerEvent>? _accelSubscription;
+
+  // Fire ambience sound
+  bool _isFireOn = false;
+  AudioPlayer? _firePlayer;
+  late AnimationController _fireAnimController;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Allow rotation in this screen (easter egg feature)
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+
+    // Hide status bar for immersive experience
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+    // Background animation - but we'll use 30fps Timer instead of 60fps vsync
     _backgroundAnimController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 10),
-    )..repeat();
+    ); // Don't repeat - we use _backgroundTimer at 30fps instead
+
+    // Start 30fps timer for background/emoji animations (battery optimization)
+    _start30fpsTimer();
 
     _glowAnimController = AnimationController(
       vsync: this,
@@ -64,7 +99,40 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
       duration: const Duration(milliseconds: 800),
     );
 
+    _fireAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
     _initFloatingEmojis();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Auto-pause everything when app goes to background (save battery)
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _stopGravityLock();
+      _firePlayer?.pause();
+      _timer?.cancel(); // Stop timer to prevent background completion
+      // Pause animations
+      _stop30fpsTimer();
+      _glowAnimController.stop();
+      _fireAnimController.stop();
+    } else if (state == AppLifecycleState.resumed) {
+      // Resume fire sound if it was on
+      if (_isFireOn) {
+        _firePlayer?.resume();
+        _fireAnimController.repeat(reverse: true);
+      }
+      // Resume timer if forging and not paused
+      if (_isForging && !_isPaused) {
+        _startTimer();
+      }
+      // Resume animations
+      _start30fpsTimer();
+      _glowAnimController.repeat(reverse: true);
+    }
   }
 
   void _initFloatingEmojis() {
@@ -82,12 +150,47 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
     }
   }
 
+  // 30fps timer for background animations (saves ~50% battery vs 60fps)
+  void _start30fpsTimer() {
+    _backgroundTimer?.cancel();
+    _backgroundTimer = Timer.periodic(
+      const Duration(milliseconds: _backgroundFrameInterval),
+      (_) {
+        if (mounted) {
+          setState(() {
+            // Update animation value (10 second cycle)
+            _backgroundAnimValue =
+                (_backgroundAnimValue + _backgroundFrameInterval / 10000) % 1.0;
+          });
+        }
+      },
+    );
+  }
+
+  void _stop30fpsTimer() {
+    _backgroundTimer?.cancel();
+    _backgroundTimer = null;
+  }
+
   @override
   void dispose() {
+    // Restore portrait-only when leaving this screen
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+
+    // Restore system UI (status bar, navigation bar)
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    WidgetsBinding.instance.removeObserver(this);
+    _accelSubscription?.cancel();
+    _firePlayer?.dispose();
     _timer?.cancel();
+    _stop30fpsTimer();
     _backgroundAnimController.dispose();
     _glowAnimController.dispose();
     _completeAnimController.dispose();
+    _fireAnimController.dispose();
     super.dispose();
   }
 
@@ -134,6 +237,114 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
       _remainingSeconds = forgeDurationSeconds;
     });
     HapticFeedback.lightImpact();
+  }
+
+  // Gravity lock methods
+  void _toggleGravityLock() {
+    if (_isGravityLocked) {
+      _stopGravityLock();
+    } else {
+      _startGravityLock();
+    }
+    HapticFeedback.mediumImpact();
+  }
+
+  void _startGravityLock() {
+    // Lock screen orientation to current orientation
+    final currentOrientation = MediaQuery.of(context).orientation;
+    _lockedOrientation = currentOrientation;
+
+    if (currentOrientation == Orientation.landscape) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
+
+    _accelSubscription?.cancel();
+    _accelSubscription = accelerometerEventStream(
+      samplingPeriod: const Duration(milliseconds: 50), // 20Hz for smoothness
+    ).listen((event) {
+      // Calculate angle from accelerometer
+      // Adjust axes based on locked orientation
+      double newAngle;
+      if (_lockedOrientation == Orientation.landscape) {
+        // In landscape: swap axes and flip 180°
+        newAngle = math.atan2(event.y, -event.x);
+      } else {
+        // In portrait: standard calculation
+        newAngle = math.atan2(event.x, event.y);
+      }
+
+      // Smooth the angle with low-pass filter to reduce jitter
+      const smoothingFactor = 0.18;
+      const threshold = 0.015; // Ignore very small changes
+
+      if (mounted) {
+        final diff = newAngle - _deviceAngle;
+        // Handle angle wrapping around ±π
+        final wrappedDiff = math.atan2(math.sin(diff), math.cos(diff));
+
+        if (wrappedDiff.abs() > threshold) {
+          setState(() {
+            _deviceAngle += wrappedDiff * smoothingFactor;
+          });
+        }
+      }
+    });
+    setState(() => _isGravityLocked = true);
+  }
+
+  void _stopGravityLock() {
+    _accelSubscription?.cancel();
+    _accelSubscription = null;
+
+    // Restore free rotation
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+
+    if (mounted) {
+      setState(() {
+        _isGravityLocked = false;
+        _deviceAngle = 0.0;
+        _lockedOrientation = null;
+      });
+    }
+  }
+
+  // Fire ambience methods
+  Future<void> _toggleFire() async {
+    if (_isFireOn) {
+      _stopFire();
+    } else {
+      await _startFire();
+    }
+    HapticFeedback.lightImpact();
+  }
+
+  Future<void> _startFire() async {
+    _firePlayer ??= AudioPlayer();
+    await _firePlayer!.setReleaseMode(ReleaseMode.loop);
+    await _firePlayer!.setVolume(0.3); // Default: not too loud
+    await _firePlayer!.play(AssetSource('sounds/fire_loop.mp3'));
+    _fireAnimController.repeat(reverse: true);
+    setState(() => _isFireOn = true);
+  }
+
+  void _stopFire() {
+    _firePlayer?.stop();
+    _fireAnimController.stop();
+    _fireAnimController.value = 0;
+    setState(() => _isFireOn = false);
   }
 
   Future<void> _onForgeComplete() async {
@@ -193,74 +404,195 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 Navigator.of(context).pop();
               }
             },
-            child: Stack(
-              children: [
-                // Background gradient
-                _buildBackground(yearConfig),
+            child: OrientationBuilder(
+              builder: (context, orientation) {
+                final isLandscape = orientation == Orientation.landscape;
 
-                // Animated background effects
-                _buildAnimatedBackground(yearConfig),
+                return Stack(
+                  children: [
+                    // Background gradient
+                    _buildBackground(yearConfig),
 
-                // Floating emojis
-                _buildFloatingEmojis(),
+                    // Animated background effects
+                    _buildAnimatedBackground(yearConfig),
 
-                // Main content
-                SafeArea(
-                  child: Stack(
-                    children: [
-                      // Top left - Status info
+                    // Floating emojis
+                    _buildFloatingEmojis(),
+
+                    // Main content - adaptive layout
+                    SafeArea(
+                      child: isLandscape
+                          ? _buildLandscapeLayout(service, yearConfig, currentPart)
+                          : _buildPortraitLayout(service, yearConfig, currentPart),
+                    ),
+
+                    // Close hint (when not forging)
+                    if (!_isForging)
                       Positioned(
-                        top: 16,
-                        left: 16,
-                        child: _buildStatusPanel(service, yearConfig),
-                      ),
-
-                      // Top right - Forge CP display
-                      Positioned(
-                        top: 16,
-                        right: 16,
-                        child: _buildForgeCpDisplay(service, yearConfig),
-                      ),
-
-                      // Center - Main forge area
-                      Center(
-                        child: _buildForgeCenter(
-                          currentPart,
-                          yearConfig,
-                          service.animationPhase,
-                        ),
-                      ),
-
-                      // Bottom - Status text
-                      Positioned(
-                        bottom: 40,
+                        bottom: 16,
                         left: 0,
                         right: 0,
-                        child: _buildBottomStatus(yearConfig),
+                        child: Center(
+                          child: Text(
+                            AppText.tapToClose,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Portrait layout - original vertical stacked design
+  Widget _buildPortraitLayout(
+    GrowthService service,
+    YearConfig yearConfig,
+    CyberPart currentPart,
+  ) {
+    return Stack(
+      children: [
+        // Top left - Status info
+        Positioned(
+          top: 16,
+          left: 16,
+          child: _buildStatusPanel(service, yearConfig),
+        ),
+
+        // Top right - Forge CP display
+        Positioned(
+          top: 16,
+          right: 16,
+          child: _buildForgeCpDisplay(service, yearConfig),
+        ),
+
+        // Center - Main forge area
+        Center(
+          child: _buildForgeCenter(
+            currentPart,
+            yearConfig,
+            service.animationPhase,
+          ),
+        ),
+
+        // Bottom left - Gravity lock button
+        Positioned(
+          bottom: 100,
+          left: 16,
+          child: _buildGravityLockButton(yearConfig),
+        ),
+
+        // Bottom right - Fire ambience button
+        Positioned(
+          bottom: 100,
+          right: 16,
+          child: _buildFireButton(yearConfig),
+        ),
+
+        // Bottom - Status text
+        Positioned(
+          bottom: 56,
+          left: 0,
+          right: 0,
+          child: _buildBottomStatus(yearConfig),
+        ),
+      ],
+    );
+  }
+
+  /// Landscape layout - horizontal arrangement for wide screens
+  Widget _buildLandscapeLayout(
+    GrowthService service,
+    YearConfig yearConfig,
+    CyberPart currentPart,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableHeight = constraints.maxHeight;
+
+        // Scale factor based on available height (target ~300 for comfortable display)
+        final heightScale = (availableHeight / 300).clamp(0.6, 1.2);
+
+        // Calculate forge size based on available space
+        final forgeSize = (availableHeight * 0.55).clamp(100.0, 180.0);
+
+        return Row(
+          children: [
+            // Left panel - Status info panels
+            Expanded(
+              flex: 2,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8 * heightScale,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildStatusPanel(service, yearConfig, scale: heightScale),
+                      SizedBox(height: 12 * heightScale),
+                      _buildForgeCpDisplay(service, yearConfig, scale: heightScale),
+                      SizedBox(height: 12 * heightScale),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildGravityLockButton(yearConfig, scale: heightScale),
+                          SizedBox(width: 8 * heightScale),
+                          _buildFireButton(yearConfig, scale: heightScale),
+                        ],
                       ),
                     ],
                   ),
                 ),
-
-                // Close hint (when not forging)
-                if (!_isForging)
-                  Positioned(
-                    bottom: 16,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Text(
-                        AppText.tapToClose,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
-          ),
+
+            // Center - Main forge area (flex 3 to give more space)
+            Expanded(
+              flex: 3,
+              child: Center(
+                child: _buildForgeCenter(
+                  currentPart,
+                  yearConfig,
+                  service.animationPhase,
+                  isLandscape: true,
+                  customSize: forgeSize,
+                ),
+              ),
+            ),
+
+            // Right panel - Status text
+            Expanded(
+              flex: 2,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8 * heightScale,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildBottomStatus(yearConfig, scale: heightScale),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -283,64 +615,62 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   }
 
   Widget _buildAnimatedBackground(YearConfig yearConfig) {
-    return AnimatedBuilder(
-      animation: _backgroundAnimController,
-      builder: (context, _) {
-        return CustomPaint(
-          size: Size.infinite,
-          painter: _WorkshopBackgroundPainter(
-            animation: _backgroundAnimController.value,
-            accentColor: const Color(0xFFFFBF00), // Amber/gold for forge
-          ),
-        );
-      },
+    // Uses 30fps _backgroundAnimValue instead of 60fps AnimationController
+    return RepaintBoundary(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _WorkshopBackgroundPainter(
+          animation: _backgroundAnimValue,
+          accentColor: yearConfig.accentColor,
+        ),
+      ),
     );
   }
 
   Widget _buildFloatingEmojis() {
-    return AnimatedBuilder(
-      animation: _backgroundAnimController,
-      builder: (context, _) {
-        // Update emoji positions
-        for (final emoji in _floatingEmojis) {
-          emoji.y -= emoji.speed;
-          emoji.rotation += emoji.rotationSpeed;
-          if (emoji.y < -0.1) {
-            emoji.y = 1.1;
-            emoji.x = math.Random().nextDouble();
-          }
-        }
+    // Update emoji positions (called at 30fps via _backgroundTimer)
+    for (final emoji in _floatingEmojis) {
+      emoji.y -= emoji.speed;
+      emoji.rotation += emoji.rotationSpeed;
+      if (emoji.y < -0.1) {
+        emoji.y = 1.1;
+        emoji.x = math.Random().nextDouble();
+      }
+    }
 
-        return Stack(
-          children: _floatingEmojis.map((emoji) {
-            return Positioned(
-              left: emoji.x * MediaQuery.of(context).size.width,
-              top: emoji.y * MediaQuery.of(context).size.height,
-              child: Transform.rotate(
-                angle: emoji.rotation,
-                child: Opacity(
-                  opacity: emoji.opacity,
-                  child: Text(
-                    emoji.emoji,
-                    style: TextStyle(fontSize: emoji.size),
-                  ),
+    final screenSize = MediaQuery.of(context).size;
+
+    // RepaintBoundary isolates this from other repaints
+    return RepaintBoundary(
+      child: Stack(
+        children: _floatingEmojis.map((emoji) {
+          return Positioned(
+            left: emoji.x * screenSize.width,
+            top: emoji.y * screenSize.height,
+            child: Transform.rotate(
+              angle: emoji.rotation,
+              child: Opacity(
+                opacity: emoji.opacity,
+                child: Text(
+                  emoji.emoji,
+                  style: TextStyle(fontSize: emoji.size),
                 ),
               ),
-            );
-          }).toList(),
-        );
-      },
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
-  Widget _buildStatusPanel(GrowthService service, YearConfig yearConfig) {
+  Widget _buildStatusPanel(GrowthService service, YearConfig yearConfig, {double scale = 1.0}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12 * scale, vertical: 8 * scale),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * scale),
         border: Border.all(
-          color: const Color(0xFFFFBF00).withValues(alpha: 0.3),
+          color: yearConfig.accentColor.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -352,38 +682,38 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             _getModuleName(service),
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 12,
+              fontSize: 12 * scale,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4 * scale),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 80,
-                height: 4,
+                width: 80 * scale,
+                height: 4 * scale,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(2 * scale),
                 ),
                 child: FractionallySizedBox(
                   alignment: Alignment.centerLeft,
                   widthFactor: service.yearProgress,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFBF00),
-                      borderRadius: BorderRadius.circular(2),
+                      color: yearConfig.accentColor,
+                      borderRadius: BorderRadius.circular(2 * scale),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: 8 * scale),
               Text(
                 service.getProgressText(language: AppText.language),
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 11,
+                  fontSize: 11 * scale,
                 ),
               ),
             ],
@@ -400,82 +730,82 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
     return '${AppText.growthRoundNumber(round)}: $displayName';
   }
 
-  Widget _buildForgeCpDisplay(GrowthService service, YearConfig yearConfig) {
+  Widget _buildForgeCpDisplay(GrowthService service, YearConfig yearConfig, {double scale = 1.0}) {
     final forgeCp = service.todayForgeCp;
     final forgeCount = service.todayForgeCpCount;
     final canEarn = service.canEarnForgeCp;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12 * scale, vertical: 8 * scale),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * scale),
         border: Border.all(
-          color: const Color(0xFFFFBF00).withValues(alpha: 0.3),
+          color: yearConfig.accentColor.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '⚙️ FORGE CP',
+                AppText.forgeCpLabel,
                 style: TextStyle(
-                  color: const Color(0xFFFFBF00),
-                  fontSize: 10,
+                  color: yearConfig.accentColor,
+                  fontSize: 10 * scale,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4 * scale),
           Text(
             '${forgeCp.toStringAsFixed(1)} / 1.0',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 16 * scale,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: 4 * scale),
           // 5 slot indicators
           Row(
             mainAxisSize: MainAxisSize.min,
             children: List.generate(5, (i) {
               final filled = i < forgeCount;
               return Container(
-                width: 12,
-                height: 12,
-                margin: EdgeInsets.only(left: i > 0 ? 4 : 0),
+                width: 12 * scale,
+                height: 12 * scale,
+                margin: EdgeInsets.only(left: i > 0 ? 4 * scale : 0),
                 decoration: BoxDecoration(
                   color: filled
-                      ? const Color(0xFFFFBF00)
+                      ? yearConfig.accentColor
                       : Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(2 * scale),
                   border: Border.all(
-                    color: const Color(0xFFFFBF00).withValues(alpha: 0.5),
+                    color: yearConfig.accentColor.withValues(alpha: 0.5),
                     width: 1,
                   ),
                 ),
                 child: filled
-                    ? const Center(
-                        child: Text('✓', style: TextStyle(fontSize: 8, color: Colors.black)),
+                    ? Center(
+                        child: Text('✓', style: TextStyle(fontSize: 8 * scale, color: Colors.black)),
                       )
                     : null,
               );
             }),
           ),
           if (!canEarn) ...[
-            const SizedBox(height: 4),
+            SizedBox(height: 4 * scale),
             Text(
               AppText.forgeDailyMax,
               style: TextStyle(
                 color: Colors.orange.withValues(alpha: 0.8),
-                fontSize: 9,
+                fontSize: 9 * scale,
               ),
             ),
           ],
@@ -487,11 +817,34 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   Widget _buildForgeCenter(
     CyberPart currentPart,
     YearConfig yearConfig,
-    PartAnimationPhase phase,
-  ) {
+    PartAnimationPhase phase, {
+    bool isLandscape = false,
+    double? customSize,
+  }) {
     final progress = _isForging
         ? 1 - (_remainingSeconds / forgeDurationSeconds)
         : 0.0;
+
+    // Adjust sizes for landscape mode (smaller to fit better)
+    // Use customSize if provided (for dynamic landscape sizing)
+    final baseSize = customSize ?? (isLandscape ? 160.0 : 200.0);
+    final outerSize = baseSize;
+    final ringSize = baseSize * 0.9;
+    final innerSize = baseSize * 0.8;
+    final emojiSize = baseSize * 0.32;
+    final timeSize = baseSize * 0.1;
+
+    // Forge amber color for that hot metal / furnace feel
+    const forgeAmber = Color(0xFFFF9800); // Amber/orange for forging
+    const forgePausedColor = Color(0xFFFF5722); // Deep orange when paused
+
+    // Use amber when forging, year accent when idle
+    final activeColor = _isForging
+        ? (_isPaused ? forgePausedColor : forgeAmber)
+        : yearConfig.accentColor;
+
+    // Fixed height for time area to prevent layout jump
+    final timeAreaHeight = baseSize * 0.35;
 
     return GestureDetector(
       onTap: () {
@@ -509,7 +862,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         animation: _glowAnimController,
         builder: (context, _) {
           final glowIntensity = _isForging
-              ? 0.4 + 0.3 * _glowAnimController.value
+              ? 0.5 + 0.4 * _glowAnimController.value  // Stronger glow when forging
               : 0.2 + 0.1 * _glowAnimController.value;
 
           return AnimatedBuilder(
@@ -517,87 +870,116 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             builder: (context, _) {
               final completeScale = 1.0 + 0.3 * _completeAnimController.value;
 
-              return Transform.scale(
-                scale: completeScale,
-                child: Container(
-                  width: 200,
-                  height: 200,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFFFBF00).withValues(alpha: glowIntensity),
-                        blurRadius: _isForging ? 60 : 30,
-                        spreadRadius: _isForging ? 10 : 5,
-                      ),
-                    ],
-                  ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Progress ring
-                      SizedBox(
-                        width: 180,
-                        height: 180,
-                        child: CircularProgressIndicator(
-                          value: progress,
-                          strokeWidth: 6,
-                          backgroundColor: Colors.white.withValues(alpha: 0.1),
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            _isPaused
-                                ? Colors.orange
-                                : const Color(0xFFFFBF00),
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Circle (slightly raised by the time area below)
+                  Transform.scale(
+                    scale: completeScale,
+                    child: Container(
+                      width: outerSize,
+                      height: outerSize,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: activeColor.withValues(alpha: glowIntensity),
+                            blurRadius: _isForging ? baseSize * 0.35 : baseSize * 0.15,
+                            spreadRadius: _isForging ? baseSize * 0.06 : baseSize * 0.025,
                           ),
-                        ),
-                      ),
-
-                      // Inner circle background
-                      Container(
-                        width: 160,
-                        height: 160,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.black.withValues(alpha: 0.7),
-                          border: Border.all(
-                            color: const Color(0xFFFFBF00).withValues(alpha: 0.4),
-                            width: 2,
-                          ),
-                        ),
-                      ),
-
-                      // Part emoji
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            currentPart.emoji,
-                            style: const TextStyle(fontSize: 64),
-                          ),
-                          if (_isForging && _showTime) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              _formatTime(_remainingSeconds),
-                              style: TextStyle(
-                                color: _isPaused ? Colors.orange : Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ],
-                          if (_isPaused)
-                            Text(
-                              AppText.forgePaused,
-                              style: TextStyle(
-                                color: Colors.orange,
-                                fontSize: 12,
-                              ),
+                          // Extra inner glow when forging for more fire-like effect
+                          if (_isForging)
+                            BoxShadow(
+                              color: Colors.yellow.withValues(alpha: glowIntensity * 0.3),
+                              blurRadius: baseSize * 0.2,
+                              spreadRadius: baseSize * 0.02,
                             ),
                         ],
                       ),
-                    ],
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Progress ring
+                          SizedBox(
+                            width: ringSize,
+                            height: ringSize,
+                            child: CircularProgressIndicator(
+                              value: progress,
+                              strokeWidth: baseSize * 0.03,
+                              backgroundColor: Colors.white.withValues(alpha: 0.1),
+                              valueColor: AlwaysStoppedAnimation<Color>(activeColor),
+                            ),
+                          ),
+
+                          // Inner circle background
+                          Container(
+                            width: innerSize,
+                            height: innerSize,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black.withValues(alpha: 0.7),
+                              border: Border.all(
+                                color: activeColor.withValues(alpha: 0.5),
+                                width: baseSize * 0.01,
+                              ),
+                            ),
+                          ),
+
+                          // Part emoji only (centered, fixed position)
+                          // When gravity locked, rotate to always point down
+                          Transform.rotate(
+                            angle: _isGravityLocked ? _deviceAngle : 0.0,
+                            child: Text(
+                              currentPart.emoji,
+                              style: TextStyle(fontSize: emojiSize),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+
+                  // Time display area (fixed height to prevent jumping)
+                  SizedBox(
+                    height: timeAreaHeight,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(height: baseSize * 0.08),
+                        if (_isForging && _showTime)
+                          Text(
+                            _formatTime(_remainingSeconds),
+                            style: TextStyle(
+                              color: _isPaused ? Colors.orange : activeColor,
+                              fontSize: timeSize * 1.2,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                              shadows: [
+                                Shadow(
+                                  color: activeColor.withValues(alpha: 0.5),
+                                  blurRadius: 8,
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (_isForging)
+                          // Placeholder to maintain height
+                          SizedBox(height: timeSize * 1.2),
+                        if (_isPaused)
+                          Padding(
+                            padding: EdgeInsets.only(top: baseSize * 0.02),
+                            child: Text(
+                              AppText.forgePaused,
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontSize: baseSize * 0.07,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           );
@@ -606,7 +988,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
     );
   }
 
-  Widget _buildBottomStatus(YearConfig yearConfig) {
+  Widget _buildBottomStatus(YearConfig yearConfig, {double scale = 1.0}) {
     String statusText;
     if (!_isForging) {
       statusText = AppText.forgeTapToStart;
@@ -623,36 +1005,128 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         Text(
           _isForging ? '⚙️ ${AppText.forgeStatus} ⚙️' : '⚙️ ${AppText.forgeReady} ⚙️',
           style: TextStyle(
-            color: const Color(0xFFFFBF00),
-            fontSize: 16,
+            color: yearConfig.accentColor,
+            fontSize: 16 * scale,
             fontWeight: FontWeight.bold,
             shadows: [
               Shadow(
-                color: const Color(0xFFFFBF00).withValues(alpha: 0.5),
-                blurRadius: 10,
+                color: yearConfig.accentColor.withValues(alpha: 0.5),
+                blurRadius: 10 * scale,
               ),
             ],
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: 8 * scale),
         Text(
           statusText,
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.6),
-            fontSize: 12,
+            fontSize: 12 * scale,
           ),
         ),
-        if (_isForging) ...[
-          const SizedBox(height: 4),
+        if (!_isForging) ...[
+          SizedBox(height: 4 * scale),
           Text(
-            AppText.forgeLongPressCancel,
+            AppText.forgeHint,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.4),
-              fontSize: 10,
+              fontSize: 10 * scale,
             ),
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildGravityLockButton(YearConfig yearConfig, {double scale = 1.0}) {
+    final buttonSize = 44 * scale;
+
+    return GestureDetector(
+      onTap: _toggleGravityLock,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: buttonSize,
+        height: buttonSize,
+        decoration: BoxDecoration(
+          color: _isGravityLocked
+              ? yearConfig.accentColor.withValues(alpha: 0.2)
+              : Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12 * scale),
+          border: Border.all(
+            color: _isGravityLocked
+                ? yearConfig.accentColor
+                : Colors.white.withValues(alpha: 0.2),
+            width: 1,
+          ),
+          boxShadow: _isGravityLocked
+              ? [
+                  BoxShadow(
+                    color: yearConfig.accentColor.withValues(alpha: 0.4),
+                    blurRadius: 8 * scale,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        child: Center(
+          child: Icon(
+            Icons.explore,
+            color: _isGravityLocked
+                ? yearConfig.accentColor
+                : Colors.white.withValues(alpha: 0.3),
+            size: 22 * scale,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFireButton(YearConfig yearConfig, {double scale = 1.0}) {
+    final buttonSize = 44 * scale;
+    const fireOrange = Color(0xFFFF6B00);
+
+    return GestureDetector(
+      onTap: _toggleFire,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: buttonSize,
+        height: buttonSize,
+        decoration: BoxDecoration(
+          color: _isFireOn
+              ? fireOrange.withValues(alpha: 0.2)
+              : Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12 * scale),
+          border: Border.all(
+            color: _isFireOn
+                ? fireOrange
+                : Colors.white.withValues(alpha: 0.2),
+            width: 1,
+          ),
+          boxShadow: _isFireOn
+              ? [
+                  BoxShadow(
+                    color: fireOrange.withValues(alpha: 0.4),
+                    blurRadius: 8 * scale,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
+        ),
+        child: Center(
+          // Grayscale filter when fire is off
+          child: _isFireOn
+              ? Text('🔥', style: TextStyle(fontSize: 22 * scale))
+              : ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    0.2126, 0.7152, 0.0722, 0, 0,
+                    0.2126, 0.7152, 0.0722, 0, 0,
+                    0.2126, 0.7152, 0.0722, 0, 0,
+                    0, 0, 0, 0.5, 0,
+                  ]),
+                  child: Text('🔥', style: TextStyle(fontSize: 22 * scale)),
+                ),
+        ),
+      ),
     );
   }
 }
@@ -675,9 +1149,8 @@ class _FloatingEmoji {
     required this.size,
     required this.speed,
     required this.opacity,
-    this.rotation = 0,
     required this.rotationSpeed,
-  });
+  }) : rotation = 0;
 }
 
 /// Background painter for workshop atmosphere
