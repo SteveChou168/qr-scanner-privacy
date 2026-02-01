@@ -80,9 +80,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   int _sessionHighRpm = 0; // Highest RPM in current session
   static const int _rpmHistoryLength = 5; // Number of ghost frames
   static const double _maxVelocity = 50.0; // Max angular velocity
-  static const double _rpmScale = 60.0; // Base scale: velocity to RPM (50 * 60 = 3000 base max)
   static const int _baseMaxRpm = 6000; // Base max RPM
-  static const double _durationBonusTime = 30.0; // Seconds to reach max duration bonus
+  static const double _phase1Duration = 20.0; // Seconds to reach 3000 RPM
+  static const double _phase2Duration = 20.0; // Additional seconds to reach max (total 40s)
   static const double _friction = 0.985; // Friction coefficient per frame
   static const double _velocityThreshold = 0.1; // Stop threshold
 
@@ -219,22 +219,32 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
               final totalDays = GrowthService.instance.totalDays;
               final dynamicMaxRpm = _baseMaxRpm + totalDays;
 
-              // Update RPM history for ghost effect
-              // Base RPM from velocity (0-3000)
-              final baseRpm = absVelocity * _rpmScale;
+              // Two-phase RPM progression:
+              // Phase 1 (0-20s): 0-3000 RPM based on velocity + time
+              // Phase 2 (20-40s): 3001-max RPM with continued spinning
 
-              // Duration bonus: linearly increase up to +3000 over 30 seconds
-              final durationFactor = (_spinDuration / _durationBonusTime).clamp(0.0, 1.0);
-              final durationBonus = durationFactor * 3000.0;
+              int currentRpm;
 
-              // Combined RPM
-              int currentRpm = (baseRpm + durationBonus).toInt();
+              if (_spinDuration < _phase1Duration) {
+                // Phase 1: velocity-based with time scaling (0-3000)
+                final velocityFactor = absVelocity / _maxVelocity; // 0.0 ~ 1.0
+                final timeFactor = _spinDuration / _phase1Duration; // 0.0 ~ 1.0
+                // Combine: faster spin + longer time = higher RPM
+                final combinedFactor = (velocityFactor * 0.6 + timeFactor * 0.4).clamp(0.0, 1.0);
+                currentRpm = (combinedFactor * 3000).toInt();
+              } else {
+                // Phase 2: 3000 + bonus towards max (over next 20s)
+                final phase2Time = _spinDuration - _phase1Duration;
+                final phase2Factor = (phase2Time / _phase2Duration).clamp(0.0, 1.0);
+                final bonusRpm = phase2Factor * (dynamicMaxRpm - 3000);
+                currentRpm = 3000 + bonusRpm.toInt();
 
-              // When near max, use random range (maxRpm - 50) to (maxRpm - 1)
-              if (currentRpm >= dynamicMaxRpm - 100) {
-                final minRange = dynamicMaxRpm - 50;
-                final maxRange = dynamicMaxRpm - 1;
-                currentRpm = minRange + math.Random().nextInt(maxRange - minRange + 1);
+                // When near max, use random range (maxRpm - 50) to (maxRpm - 1)
+                if (currentRpm >= dynamicMaxRpm - 60) {
+                  final minRange = dynamicMaxRpm - 50;
+                  final maxRange = dynamicMaxRpm - 1;
+                  currentRpm = minRange + math.Random().nextInt(maxRange - minRange + 1);
+                }
               }
 
               // Clamp to dynamic max
@@ -1395,8 +1405,6 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
   /// Show RPM record dialog
   void _showRpmRecord(int dynamicMaxRpm) {
-    final totalDays = GrowthService.instance.totalDays;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1430,12 +1438,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 letterSpacing: 1,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 8),
             Text(
               _sessionHighRpm.toString().padLeft(4, '0'),
               style: TextStyle(
                 color: Colors.cyan,
-                fontSize: 32,
+                fontSize: 36,
                 fontWeight: FontWeight.bold,
                 fontFamily: 'monospace',
                 shadows: [
@@ -1443,32 +1451,13 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            // Max possible
-            Text(
-              'MAX POSSIBLE',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.5),
-                fontSize: 10,
-                letterSpacing: 1,
-              ),
-            ),
             const SizedBox(height: 4),
             Text(
-              '${dynamicMaxRpm - 1}',
+              'RPM',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.8),
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '(6000 + $totalDays days)',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 11,
+                color: Colors.cyan.withValues(alpha: 0.6),
+                fontSize: 12,
+                letterSpacing: 2,
               ),
             ),
           ],
