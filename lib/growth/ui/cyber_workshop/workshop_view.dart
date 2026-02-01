@@ -74,18 +74,18 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   Offset? _spinnerCenter; // Center point for angle calculation
   int _hapticCounter = 0; // Counter for periodic haptic feedback
   final List<int> _rpmHistory = []; // History for ghost number effect
-  double _spinDuration = 0.0; // How long user has been spinning (seconds)
   int _sessionHighRpm = 0; // Highest RPM in current session
   int _currentRpm = 0; // Current live RPM (0 when stopped)
+  bool _wasSpinning = false; // Track spinning state for save trigger
   static const int _rpmHistoryLength = 5; // Number of ghost frames
-  static const double _maxVelocity = 50.0; // Max angular velocity
+  static const double _maxVelocity = 50.0; // Max angular velocity (rad/s)
   static const int _baseMaxRpm = 6000; // Base max RPM
-  static const double _phase1Duration = 20.0; // Seconds to reach 3000 RPM
-  static const double _phase2Duration = 20.0; // Additional seconds to reach max (total 40s)
+  // RPM = velocity × scale (50 rad/s → 6000 RPM)
+  static const double _rpmScale = 120.0;
   // Friction: high speed = fast decay, low speed = slow tail
   static const double _frictionHighSpeed = 0.92; // Fast decay at high RPM
   static const double _frictionLowSpeed = 0.985; // Slow tail at low RPM
-  static const double _velocityThreshold = 0.1; // Stop threshold
+  static const double _velocityThreshold = 0.05; // Stop threshold (lowered for smoother fade)
 
   @override
   void initState() {
@@ -188,6 +188,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             // Update fidget spinner physics (only when not touching and has velocity)
             if (!_isTouching && _spinnerVelocity.abs() > _velocityThreshold) {
               _spinnerAngle += _spinnerVelocity * (_backgroundFrameInterval / 1000);
+              // Normalize angle to prevent overflow (keep within 0-2π)
+              _spinnerAngle = _spinnerAngle % (2 * math.pi);
 
               // Variable friction: fast decay at high speed, slow tail at low speed
               final speedRatio = (_spinnerVelocity.abs() / _maxVelocity).clamp(0.0, 1.0);
@@ -197,9 +199,23 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
               _spinnerVelocity = 0.0; // Stop completely below threshold
             }
 
-            // Periodic haptic feedback while spinning (frequency based on speed)
+            // Calculate RPM from velocity (both while touching and coasting)
             final absVelocity = _spinnerVelocity.abs();
-            if (absVelocity > _velocityThreshold) {
+
+            // Dynamic max RPM based on login days (6000 + totalDays)
+            final totalDays = GrowthService.instance.totalDays;
+            final dynamicMaxRpm = _baseMaxRpm + totalDays;
+
+            // RPM = velocity × scale factor (purely physics-based)
+            int currentRpm = (absVelocity * _rpmScale).toInt().clamp(0, dynamicMaxRpm);
+
+            _currentRpm = currentRpm;
+
+            // Periodic haptic feedback while spinning (frequency based on speed)
+            final isSpinning = absVelocity > _velocityThreshold;
+
+            if (isSpinning) {
+              _wasSpinning = true;
               _hapticCounter++;
               // Higher speed = more frequent haptics
               final hapticInterval = absVelocity > _maxVelocity * 0.7
@@ -217,61 +233,23 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 }
               }
 
-              // Track spin duration
-              _spinDuration += _backgroundFrameInterval / 1000;
-
-              // Dynamic max RPM based on login days (6000 + totalDays)
-              final totalDays = GrowthService.instance.totalDays;
-              final dynamicMaxRpm = _baseMaxRpm + totalDays;
-
-              // Two-phase RPM progression:
-              // Phase 1 (0-20s): 0-3000 RPM based on velocity + time
-              // Phase 2 (20-40s): 3001-max RPM with continued spinning
-
-              int currentRpm;
-
-              if (_spinDuration < _phase1Duration) {
-                // Phase 1: velocity-based with time scaling (0-3000)
-                final velocityFactor = absVelocity / _maxVelocity; // 0.0 ~ 1.0
-                final timeFactor = _spinDuration / _phase1Duration; // 0.0 ~ 1.0
-                // Combine: faster spin + longer time = higher RPM
-                final combinedFactor = (velocityFactor * 0.6 + timeFactor * 0.4).clamp(0.0, 1.0);
-                currentRpm = (combinedFactor * 3000).toInt();
-              } else {
-                // Phase 2: 3000 + bonus towards max (over next 20s)
-                final phase2Time = _spinDuration - _phase1Duration;
-                final phase2Factor = (phase2Time / _phase2Duration).clamp(0.0, 1.0);
-                final bonusRpm = phase2Factor * (dynamicMaxRpm - 3000);
-                currentRpm = 3000 + bonusRpm.toInt();
-
-                // When near max, use random range (maxRpm - 50) to (maxRpm - 1)
-                if (currentRpm >= dynamicMaxRpm - 60) {
-                  final minRange = dynamicMaxRpm - 50;
-                  final maxRange = dynamicMaxRpm - 1;
-                  currentRpm = minRange + math.Random().nextInt(maxRange - minRange + 1);
-                }
-              }
-
-              // Clamp to dynamic max
-              currentRpm = currentRpm.clamp(0, dynamicMaxRpm - 1);
-
-              // Track session high and history high
+              // Track session high (only update history high when spinning stops)
               if (currentRpm > _sessionHighRpm) {
                 _sessionHighRpm = currentRpm;
-                // Update history high if new record
-                GrowthService.instance.updateSpinnerHighRpm(currentRpm);
               }
 
-              _currentRpm = currentRpm;
+              // Update RPM history for ghost effect
               _rpmHistory.insert(0, currentRpm);
               if (_rpmHistory.length > _rpmHistoryLength) {
                 _rpmHistory.removeLast();
               }
             } else {
-              // Stopped spinning - reset to 0
-              _currentRpm = 0;
+              // Just stopped spinning - save history high once
+              if (_wasSpinning && _sessionHighRpm > 0) {
+                GrowthService.instance.updateSpinnerHighRpm(_sessionHighRpm);
+                _wasSpinning = false;
+              }
               _rpmHistory.clear();
-              _spinDuration = 0.0;
             }
           });
         }
@@ -1009,8 +987,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           localPos.dy - _spinnerCenter!.dy,
           localPos.dx - _spinnerCenter!.dx,
         );
-        // Clear any lingering state when starting new spin
-        _rpmHistory.clear();
+        // If spinner was essentially stopped, reset velocity
+        // If still spinning, keep momentum for acceleration
+        if (_spinnerVelocity.abs() < _velocityThreshold * 2) {
+          _spinnerVelocity = 0.0;
+          _rpmHistory.clear();
+        }
       } : null,
       onPanUpdate: !_isForging ? (details) {
         if (_spinnerCenter == null) return;
@@ -1027,7 +1009,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
         // Accumulate velocity gradually (for acceleration feel)
         setState(() {
-          _spinnerAngle += delta;
+          _spinnerAngle = (_spinnerAngle + delta) % (2 * math.pi);
           _spinnerVelocity = (_spinnerVelocity + delta * 30).clamp(-_maxVelocity, _maxVelocity);
           _lastTouchAngle = currentAngle;
         });
@@ -1118,6 +1100,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                       ),
                       child: Stack(
                         alignment: Alignment.center,
+                        clipBehavior: Clip.none, // Allow lightning to extend beyond bounds
                         children: [
                           // Spinning ring (rotates with fidget spinner)
                           Transform.rotate(
@@ -1136,18 +1119,18 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                             ),
                           ),
 
-                          // Lightning arcs (when spinning fast)
-                          if (_currentRpm > 500)
+                          // Lightning arcs (0-4 under 3000 RPM, 5-8 above)
+                          if (_currentRpm > 750)
                             Positioned.fill(
                               child: CustomPaint(
                                 painter: _LightningPainter(
                                   arcCount: _currentRpm < 3000
-                                      ? (_currentRpm / 750).floor().clamp(0, 4)
-                                      : 5 + ((_currentRpm - 3000) / 750).floor().clamp(0, 3),
+                                      ? (_currentRpm ~/ 750).clamp(1, 4)  // 1-4 arcs
+                                      : (5 + (_currentRpm - 3000) ~/ 1000).clamp(5, 8),  // 5-8 arcs
                                   intensity: spinnerSpeed,
                                   ringRadius: ringSize / 2,
                                   innerRadius: innerSize / 2,
-                                  seed: DateTime.now().millisecondsSinceEpoch,
+                                  seed: DateTime.now().millisecondsSinceEpoch ~/ 150, // Change every 150ms
                                 ),
                               ),
                             ),
@@ -1221,8 +1204,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                     ),
                   ),
 
-                  // RPM HUD Display (only when spinning)
-                  if (!_isForging && _currentRpm > 0)
+                  // RPM HUD Display (show when spinning or recently stopped with session high)
+                  if (!_isForging && _sessionHighRpm > 0)
                     _buildRpmDisplay(baseSize, yearConfig),
                 ],
               );
@@ -1725,30 +1708,19 @@ class _LightningPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (arcCount <= 0) return;
 
-    // Calculate center from actual canvas size
     final center = Offset(size.width / 2, size.height / 2);
     final random = math.Random(seed);
 
-    // Protect inner circle - clip out the center
-    canvas.save();
-    canvas.clipPath(
-      Path()
-        ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-        ..addOval(Rect.fromCircle(center: center, radius: innerRadius))
-        ..fillType = PathFillType.evenOdd,
-    );
-
-    // Draw arcs radiating outward from ring
     for (int i = 0; i < arcCount; i++) {
+      // Spread arcs evenly around the ring with some randomness
       final startAngle = (i / arcCount) * 2 * math.pi + random.nextDouble() * 0.5;
-      final arcLength = ringRadius * (0.8 + intensity * 1.5);
-      _drawArc(canvas, size, center, startAngle, arcLength, random);
+      // Longer arcs: 1.0 ~ 2.0 × ring radius
+      final arcLength = ringRadius * (1.0 + intensity * 1.0);
+      _drawArc(canvas, center, startAngle, arcLength, random, i);
     }
-
-    canvas.restore();
   }
 
-  void _drawArc(Canvas canvas, Size size, Offset center, double startAngle, double maxLength, math.Random random) {
+  void _drawArc(Canvas canvas, Offset center, double startAngle, double maxLength, math.Random random, int index) {
     final path = Path();
 
     // Start from ring edge
@@ -1758,35 +1730,41 @@ class _LightningPainter extends CustomPainter {
     );
     path.moveTo(current.dx, current.dy);
 
+    // 3-5 segments for more jagged look
     final segments = 3 + random.nextInt(3);
     final segmentLength = maxLength / segments;
     var currentAngle = startAngle;
 
     for (int i = 0; i < segments; i++) {
-      currentAngle += (random.nextDouble() - 0.5) * 0.5;
-      final length = segmentLength * (0.7 + random.nextDouble() * 0.6);
+      // More aggressive angle changes for jagged lightning
+      currentAngle += (random.nextDouble() - 0.5) * 0.8;
+      final length = segmentLength * (0.6 + random.nextDouble() * 0.8);
 
       current = Offset(
-        (current.dx + length * math.cos(currentAngle)).clamp(0, size.width),
-        (current.dy + length * math.sin(currentAngle)).clamp(0, size.height),
+        current.dx + length * math.cos(currentAngle),
+        current.dy + length * math.sin(currentAngle),
       );
       path.lineTo(current.dx, current.dy);
     }
 
-    // Glow layer
+    // Glow layer (cyan, no blur for performance)
     final glowPaint = Paint()
-      ..color = Colors.cyan.withValues(alpha: intensity * 0.4)
+      ..color = const Color(0xFF00FFFF).withValues(alpha: 0.25 + intensity * 0.15)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 5.0 + intensity * 3.0
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
+      ..strokeWidth = 5.0 + intensity * 4.0
+      ..strokeCap = StrokeCap.round;
     canvas.drawPath(path, glowPaint);
 
-    // Core
+    // Core (white-cyan gradient based on intensity)
+    final coreColor = Color.lerp(
+      const Color(0xFF80FFFF), // Light cyan
+      Colors.white,
+      intensity * 0.5,
+    )!;
     final corePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.6 + intensity * 0.3)
+      ..color = coreColor.withValues(alpha: 0.8)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 + intensity * 1.0
+      ..strokeWidth = 1.5 + intensity * 1.5
       ..strokeCap = StrokeCap.round;
     canvas.drawPath(path, corePaint);
   }
