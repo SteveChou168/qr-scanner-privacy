@@ -74,16 +74,15 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   Offset? _spinnerCenter; // Center point for angle calculation
   int _hapticCounter = 0; // Counter for periodic haptic feedback
   final List<int> _rpmHistory = []; // History for ghost number effect
-  int _frozenRpm = 0; // RPM frozen when finger releases (record)
-  bool _rpmFrozen = false; // Whether RPM is currently frozen
   double _spinDuration = 0.0; // How long user has been spinning (seconds)
   int _sessionHighRpm = 0; // Highest RPM in current session
+  int _currentRpm = 0; // Current live RPM (0 when stopped)
   static const int _rpmHistoryLength = 5; // Number of ghost frames
   static const double _maxVelocity = 50.0; // Max angular velocity
   static const int _baseMaxRpm = 6000; // Base max RPM
   static const double _phase1Duration = 20.0; // Seconds to reach 3000 RPM
   static const double _phase2Duration = 20.0; // Additional seconds to reach max (total 40s)
-  static const double _friction = 0.985; // Friction coefficient per frame
+  static const double _friction = 0.95; // Friction coefficient (faster deceleration)
   static const double _velocityThreshold = 0.1; // Stop threshold
 
   @override
@@ -250,27 +249,22 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
               // Clamp to dynamic max
               currentRpm = currentRpm.clamp(0, dynamicMaxRpm - 1);
 
-              // Track session high
+              // Track session high and history high
               if (currentRpm > _sessionHighRpm) {
                 _sessionHighRpm = currentRpm;
+                // Update history high if new record
+                GrowthService.instance.updateSpinnerHighRpm(currentRpm);
               }
 
+              _currentRpm = currentRpm;
               _rpmHistory.insert(0, currentRpm);
               if (_rpmHistory.length > _rpmHistoryLength) {
                 _rpmHistory.removeLast();
               }
-
-              // When spinning, RPM is live (not frozen)
-              _rpmFrozen = false;
-            } else if (!_rpmFrozen && _rpmHistory.isNotEmpty) {
-              // Just stopped spinning - freeze the last RPM as a record
-              _frozenRpm = _rpmHistory.first;
-              _rpmFrozen = true;
-              // Reset duration for next spin session
-              _spinDuration = 0.0;
-              // Keep history for ghost display
-            } else if (_spinnerVelocity.abs() <= _velocityThreshold) {
-              // Fully stopped - reset duration
+            } else {
+              // Stopped spinning - reset to 0
+              _currentRpm = 0;
+              _rpmHistory.clear();
               _spinDuration = 0.0;
             }
           });
@@ -583,10 +577,19 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         ),
                       ),
 
-                    // Fidget spinner glow effect (simple cyan glow from center)
-                    if (_spinnerVelocity.abs() / _maxVelocity > 0.3)
-                      _CyberGlowOverlay(
-                        intensity: _spinnerVelocity.abs() / _maxVelocity,
+                    // Fidget spinner lightning effect (arcs radiating from center)
+                    if (_currentRpm > 500)
+                      Builder(
+                        builder: (context) {
+                          final screenSize = MediaQuery.of(context).size;
+                          final isLandscape = screenSize.width > screenSize.height;
+                          return _CyberLightningOverlay(
+                            rpm: _currentRpm,
+                            intensity: _spinnerVelocity.abs() / _maxVelocity,
+                            center: Offset(screenSize.width / 2, screenSize.height / 2),
+                            ringRadius: isLandscape ? 72.0 : 90.0,
+                          );
+                        },
                       ),
                   ],
                 );
@@ -1014,13 +1017,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           localPos.dy - _spinnerCenter!.dy,
           localPos.dx - _spinnerCenter!.dx,
         );
-        // Reset frozen state when user starts spinning again
-        if (_rpmFrozen) {
-          _rpmFrozen = false;
-          _rpmHistory.clear();
-          _frozenRpm = 0;
-          // Keep session high - don't reset it until they leave the screen
-        }
+        // Clear any lingering state when starting new spin
+        _rpmHistory.clear();
       } : null,
       onPanUpdate: !_isForging ? (details) {
         if (_spinnerCenter == null) return;
@@ -1215,8 +1213,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                     ),
                   ),
 
-                  // RPM HUD Display (only when not forging and has RPM data)
-                  if (!_isForging && (_rpmHistory.isNotEmpty || _rpmFrozen))
+                  // RPM HUD Display (only when spinning)
+                  if (!_isForging && _currentRpm > 0)
                     _buildRpmDisplay(baseSize, yearConfig),
                 ],
               );
@@ -1229,49 +1227,27 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
   /// Build the RPM HUD display with ghost numbers and glitch effect
   Widget _buildRpmDisplay(double baseSize, YearConfig yearConfig) {
-    // Get current RPM (frozen or live)
-    final currentRpm = _rpmFrozen
-        ? _frozenRpm
-        : (_rpmHistory.isNotEmpty ? _rpmHistory.first : 0);
+    // Constant font size (no scaling)
+    final fontSize = baseSize * 0.12;
 
-    // Color tiers for 0-6000 range: cyan throughout (cold, clean aesthetic)
-    // Slight intensity increase at higher speeds
+    // Color: cyan throughout
     Color getRpmColor(int rpm) {
       if (rpm < 1000) {
         return Colors.cyan;
       } else if (rpm < 3000) {
-        // Slightly brighter cyan
         final t = (rpm - 1000) / 2000;
-        return Color.lerp(Colors.cyan, const Color(0xFF00E5FF), t)!; // Cyan accent
+        return Color.lerp(Colors.cyan, const Color(0xFF00E5FF), t)!;
       } else {
-        // Intense cyan with hint of white at very high RPM
         final t = ((rpm - 3000) / 3000).clamp(0.0, 1.0);
         return Color.lerp(const Color(0xFF00E5FF), const Color(0xFF80FFFF), t)!;
       }
     }
 
-    // Font size increases with speed (scaled for 6000 max)
-    double getRpmFontSize(int rpm) {
-      final base = baseSize * 0.12;
-      if (rpm < 1000) {
-        return base;
-      } else if (rpm < 3000) {
-        return base * (1.0 + (rpm - 1000) / 2000 * 0.25); // Up to 1.25x
-      } else {
-        return base * (1.25 + ((rpm - 3000) / 3000).clamp(0.0, 1.0) * 0.25); // Up to 1.5x
-      }
-    }
-
-    final rpmColor = getRpmColor(currentRpm);
-    final fontSize = getRpmFontSize(currentRpm);
-    final isHighSpeed = currentRpm >= 4000;
-
-    // Dynamic max RPM based on login days
-    final totalDays = GrowthService.instance.totalDays;
-    final dynamicMaxRpm = _baseMaxRpm + totalDays;
+    final rpmColor = getRpmColor(_currentRpm);
+    final isHighSpeed = _currentRpm >= 4000;
 
     // Glitch effect for high speed
-    final glitchOffset = isHighSpeed && !_rpmFrozen
+    final glitchOffset = isHighSpeed
         ? Offset(
             (math.Random().nextDouble() - 0.5) * 4,
             (math.Random().nextDouble() - 0.5) * 2,
@@ -1279,7 +1255,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         : Offset.zero;
 
     return GestureDetector(
-      onTap: () => _showRpmRecord(dynamicMaxRpm),
+      onTap: _showRpmRecord,
       child: Padding(
       padding: EdgeInsets.only(top: baseSize * 0.05),
       child: Column(
@@ -1315,11 +1291,11 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                   child: Stack(
                     children: [
                       // Glitch layer (offset cyan shades when high speed)
-                      if (isHighSpeed && !_rpmFrozen) ...[
+                      if (isHighSpeed) ...[
                         Transform.translate(
                           offset: const Offset(-2, 0),
                           child: Text(
-                            currentRpm.toString().padLeft(4, '0'),
+                            _currentRpm.toString().padLeft(4, '0'),
                             style: TextStyle(
                               color: const Color(0xFF00FFFF).withValues(alpha: 0.4),
                               fontSize: fontSize,
@@ -1331,7 +1307,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         Transform.translate(
                           offset: const Offset(2, 0),
                           child: Text(
-                            currentRpm.toString().padLeft(4, '0'),
+                            _currentRpm.toString().padLeft(4, '0'),
                             style: TextStyle(
                               color: const Color(0xFF80FFFF).withValues(alpha: 0.4),
                               fontSize: fontSize,
@@ -1344,9 +1320,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
                       // Main number
                       Text(
-                        currentRpm.toString().padLeft(4, '0'),
+                        _currentRpm.toString().padLeft(4, '0'),
                         style: TextStyle(
-                          color: _rpmFrozen ? rpmColor.withValues(alpha: 0.7) : rpmColor,
+                          color: rpmColor,
                           fontSize: fontSize,
                           fontWeight: FontWeight.bold,
                           fontFamily: 'monospace',
@@ -1355,7 +1331,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                               color: rpmColor.withValues(alpha: 0.6),
                               blurRadius: 8,
                             ),
-                            if (isHighSpeed && !_rpmFrozen)
+                            if (isHighSpeed)
                               Shadow(
                                 color: rpmColor.withValues(alpha: 0.8),
                                 blurRadius: 16,
@@ -1374,29 +1350,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           Text(
             'RPM',
             style: TextStyle(
-              color: _rpmFrozen
-                  ? rpmColor.withValues(alpha: 0.4)
-                  : rpmColor.withValues(alpha: 0.6),
+              color: rpmColor.withValues(alpha: 0.6),
               fontSize: baseSize * 0.05,
               fontWeight: FontWeight.w500,
               letterSpacing: 2,
             ),
           ),
-
-          // Frozen indicator
-          if (_rpmFrozen)
-            Padding(
-              padding: EdgeInsets.only(top: baseSize * 0.02),
-              child: Text(
-                '◆ RECORD ◆',
-                style: TextStyle(
-                  color: rpmColor.withValues(alpha: 0.5),
-                  fontSize: baseSize * 0.04,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 1,
-                ),
-              ),
-            ),
         ],
       ),
       ),
@@ -1404,7 +1363,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   }
 
   /// Show RPM record dialog
-  void _showRpmRecord(int dynamicMaxRpm) {
+  void _showRpmRecord() {
+    final historyHigh = GrowthService.instance.spinnerHighRpm;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1429,6 +1390,31 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // History high (all-time)
+            Text(
+              'HISTORY HIGH',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 10,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              historyHigh.toString().padLeft(4, '0'),
+              style: TextStyle(
+                color: const Color(0xFFFFD700), // Gold for history high
+                fontSize: 36,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                shadows: [
+                  Shadow(color: const Color(0xFFFFD700).withValues(alpha: 0.6), blurRadius: 10),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
             // Session high
             Text(
               'SESSION HIGH',
@@ -1438,26 +1424,14 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 letterSpacing: 1,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Text(
               _sessionHighRpm.toString().padLeft(4, '0'),
               style: TextStyle(
                 color: Colors.cyan,
-                fontSize: 36,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
                 fontFamily: 'monospace',
-                shadows: [
-                  Shadow(color: Colors.cyan.withValues(alpha: 0.6), blurRadius: 10),
-                ],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'RPM',
-              style: TextStyle(
-                color: Colors.cyan.withValues(alpha: 0.6),
-                fontSize: 12,
-                letterSpacing: 2,
               ),
             ),
           ],
@@ -1723,36 +1697,144 @@ class _SpinnerRingPainter extends CustomPainter {
   }
 }
 
-/// Simple cyan glow overlay for fidget spinner
-class _CyberGlowOverlay extends StatelessWidget {
-  final double intensity; // 0.0 ~ 1.0
+/// Lightning arcs overlay for fidget spinner
+class _CyberLightningOverlay extends StatelessWidget {
+  final int rpm;
+  final double intensity;
+  final Offset center;
+  final double ringRadius;
 
-  const _CyberGlowOverlay({
+  const _CyberLightningOverlay({
+    required this.rpm,
     required this.intensity,
+    required this.center,
+    required this.ringRadius,
   });
 
   @override
   Widget build(BuildContext context) {
-    final effectIntensity = ((intensity - 0.3) / 0.7).clamp(0.0, 1.0);
+    // Arc count: 0-4 under 3000 RPM, 5-8 at 3000+
+    int arcCount;
+    if (rpm < 3000) {
+      arcCount = (rpm / 750).floor().clamp(0, 4); // 0-4 arcs
+    } else {
+      arcCount = 5 + ((rpm - 3000) / 750).floor().clamp(0, 3); // 5-8 arcs
+    }
+
+    if (arcCount == 0) return const SizedBox.shrink();
 
     return IgnorePointer(
-      child: Center(
-        child: Container(
-          width: 300,
-          height: 300,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.cyan.withValues(alpha: effectIntensity * 0.3),
-                blurRadius: 80 + effectIntensity * 60,
-                spreadRadius: 20 + effectIntensity * 30,
-              ),
-            ],
-          ),
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _LightningPainter(
+          arcCount: arcCount,
+          intensity: intensity,
+          center: center,
+          ringRadius: ringRadius,
+          seed: DateTime.now().millisecondsSinceEpoch,
         ),
       ),
     );
+  }
+}
+
+/// Painter for lightning arcs radiating from ring
+class _LightningPainter extends CustomPainter {
+  final int arcCount;
+  final double intensity;
+  final Offset center;
+  final double ringRadius;
+  final int seed;
+
+  _LightningPainter({
+    required this.arcCount,
+    required this.intensity,
+    required this.center,
+    required this.ringRadius,
+    required this.seed,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final random = math.Random(seed);
+
+    // Protect inner circle
+    canvas.save();
+    final innerRadius = ringRadius * 0.9;
+    canvas.clipPath(
+      Path()
+        ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+        ..addOval(Rect.fromCircle(center: center, radius: innerRadius))
+        ..fillType = PathFillType.evenOdd,
+    );
+
+    // Draw arcs
+    for (int i = 0; i < arcCount; i++) {
+      final startAngle = (i / arcCount) * 2 * math.pi + random.nextDouble() * 0.5;
+      final arcLength = ringRadius * (1.0 + intensity * 2.0);
+      _drawArc(canvas, size, startAngle, arcLength, random);
+    }
+
+    // Subtle outer glow
+    final glowPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          Colors.cyan.withValues(alpha: intensity * 0.1),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: ringRadius * 2));
+    canvas.drawCircle(center, ringRadius * 2, glowPaint);
+
+    canvas.restore();
+  }
+
+  void _drawArc(Canvas canvas, Size size, double startAngle, double maxLength, math.Random random) {
+    final path = Path();
+
+    var current = Offset(
+      center.dx + ringRadius * math.cos(startAngle),
+      center.dy + ringRadius * math.sin(startAngle),
+    );
+    path.moveTo(current.dx, current.dy);
+
+    final segments = 3 + random.nextInt(3);
+    final segmentLength = maxLength / segments;
+    var currentAngle = startAngle;
+
+    for (int i = 0; i < segments; i++) {
+      currentAngle += (random.nextDouble() - 0.5) * 0.5;
+      final length = segmentLength * (0.7 + random.nextDouble() * 0.6);
+
+      current = Offset(
+        (current.dx + length * math.cos(currentAngle)).clamp(0, size.width),
+        (current.dy + length * math.sin(currentAngle)).clamp(0, size.height),
+      );
+      path.lineTo(current.dx, current.dy);
+    }
+
+    // Glow layer
+    final glowPaint = Paint()
+      ..color = Colors.cyan.withValues(alpha: intensity * 0.4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6.0 + intensity * 4.0
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
+    canvas.drawPath(path, glowPaint);
+
+    // Core
+    final corePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.7 + intensity * 0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5 + intensity * 1.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, corePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LightningPainter oldDelegate) {
+    return oldDelegate.arcCount != arcCount ||
+        oldDelegate.intensity != intensity ||
+        oldDelegate.seed != seed;
   }
 }
 

@@ -537,6 +537,23 @@ class GrowthService extends ChangeNotifier {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fidget Spinner System
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// All-time high RPM record
+  int get spinnerHighRpm => _state.spinnerHighRpm;
+
+  /// Update spinner high RPM if new record
+  Future<void> updateSpinnerHighRpm(int rpm) async {
+    if (!_isInitialized || _repository == null) return;
+    if (rpm <= _state.spinnerHighRpm) return;
+
+    _state = _state.copyWith(spinnerHighRpm: rpm);
+    await _repository!.saveState(_state);
+    notifyListeners();
+  }
+
   /// Apply bonus days from CP conversion.
   /// Similar to recordDailyLogin but doesn't update lastLoginDate.
   /// Sets _pendingResult if any module or year is completed.

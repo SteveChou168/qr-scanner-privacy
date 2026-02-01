@@ -52,6 +52,13 @@ class GrowthState {
   /// Today's forge completion count (max 5/day = 1.0 CP)
   final int todayForgeCpCount;
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fidget Spinner (Easter Egg)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// All-time high RPM record for fidget spinner
+  final int spinnerHighRpm;
+
   const GrowthState({
     this.totalDays = 0,
     this.currentYear = 1,
@@ -66,6 +73,7 @@ class GrowthState {
     this.todayAdCpCount = 0,
     this.todayScannedCodesJson = '[]',
     this.todayForgeCpCount = 0,
+    this.spinnerHighRpm = 0,
   });
 
   /// Creates initial state for a new user.
@@ -101,6 +109,7 @@ class GrowthState {
       todayAdCpCount: json['today_ad_cp_count'] as int? ?? 0,
       todayScannedCodesJson: json['today_scanned_codes_json'] as String? ?? '[]',
       todayForgeCpCount: json['today_forge_cp_count'] as int? ?? 0,
+      spinnerHighRpm: json['spinner_high_rpm'] as int? ?? 0,
     );
   }
 
@@ -120,6 +129,7 @@ class GrowthState {
       'today_ad_cp_count': todayAdCpCount,
       'today_scanned_codes_json': todayScannedCodesJson,
       'today_forge_cp_count': todayForgeCpCount,
+      'spinner_high_rpm': spinnerHighRpm,
     };
   }
 
@@ -138,6 +148,7 @@ class GrowthState {
     int? todayAdCpCount,
     String? todayScannedCodesJson,
     int? todayForgeCpCount,
+    int? spinnerHighRpm,
   }) {
     return GrowthState(
       totalDays: totalDays ?? this.totalDays,
@@ -153,6 +164,7 @@ class GrowthState {
       todayAdCpCount: todayAdCpCount ?? this.todayAdCpCount,
       todayScannedCodesJson: todayScannedCodesJson ?? this.todayScannedCodesJson,
       todayForgeCpCount: todayForgeCpCount ?? this.todayForgeCpCount,
+      spinnerHighRpm: spinnerHighRpm ?? this.spinnerHighRpm,
     );
   }
 

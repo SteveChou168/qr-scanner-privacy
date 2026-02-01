@@ -103,6 +103,11 @@ class GrowthRepository {
         'ALTER TABLE cyber_growth_state ADD COLUMN today_forge_cp_count INTEGER DEFAULT 0',
       );
     }
+    if (!columns.contains('spinner_high_rpm')) {
+      await _db.execute(
+        'ALTER TABLE cyber_growth_state ADD COLUMN spinner_high_rpm INTEGER DEFAULT 0',
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
