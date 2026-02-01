@@ -64,6 +64,16 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   AudioPlayer? _firePlayer;
   late AnimationController _fireAnimController;
 
+  // Fidget Spinner (easter egg within easter egg)
+  double _spinnerAngle = 0.0; // Current rotation angle
+  double _spinnerVelocity = 0.0; // Angular velocity (rad/s)
+  double _lastTouchAngle = 0.0; // Last touch angle for delta calculation
+  bool _isTouching = false; // Whether user is touching
+  Offset? _spinnerCenter; // Center point for angle calculation
+  static const double _maxVelocity = 50.0; // Max angular velocity
+  static const double _friction = 0.985; // Friction coefficient per frame
+  static const double _velocityThreshold = 0.1; // Stop threshold
+
   @override
   void initState() {
     super.initState();
@@ -161,6 +171,24 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             // Update animation value (10 second cycle)
             _backgroundAnimValue =
                 (_backgroundAnimValue + _backgroundFrameInterval / 10000) % 1.0;
+
+            // Update fidget spinner physics (only when not touching and has velocity)
+            if (!_isTouching && _spinnerVelocity.abs() > _velocityThreshold) {
+              _spinnerAngle += _spinnerVelocity * (_backgroundFrameInterval / 1000);
+              _spinnerVelocity *= _friction;
+
+              // Haptic feedback based on velocity
+              final absVelocity = _spinnerVelocity.abs();
+              if (absVelocity > _maxVelocity * 0.8) {
+                HapticFeedback.heavyImpact();
+              } else if (absVelocity > _maxVelocity * 0.5) {
+                HapticFeedback.mediumImpact();
+              } else if (absVelocity > _maxVelocity * 0.2) {
+                HapticFeedback.lightImpact();
+              }
+            } else if (!_isTouching) {
+              _spinnerVelocity = 0.0; // Stop completely below threshold
+            }
           });
         }
       },
@@ -426,8 +454,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                           : _buildPortraitLayout(service, yearConfig, currentPart),
                     ),
 
-                    // Close hint (when not forging)
-                    if (!_isForging)
+                    // Close hint (when not forging and not spinning fast)
+                    if (!_isForging && _spinnerVelocity.abs() / _maxVelocity < 0.7)
                       Positioned(
                         bottom: 16,
                         left: 0,
@@ -442,6 +470,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                           ),
                         ),
                       ),
+
+                    // Fidget spinner lightning effect (when spinning fast)
+                    _CyberLightningOverlay(
+                      intensity: _spinnerVelocity.abs() / _maxVelocity,
+                      animation: _backgroundAnimValue,
+                    ),
                   ],
                 );
               },
@@ -858,6 +892,44 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
       },
       onDoubleTap: _isForging ? _togglePause : null,
       onLongPress: _isForging ? _cancelForge : null,
+      // Fidget spinner: circular swipe gesture (only when not forging)
+      onPanStart: !_isForging ? (details) {
+        _isTouching = true;
+        _spinnerCenter = Offset(outerSize / 2, outerSize / 2);
+        final localPos = details.localPosition;
+        _lastTouchAngle = math.atan2(
+          localPos.dy - _spinnerCenter!.dy,
+          localPos.dx - _spinnerCenter!.dx,
+        );
+      } : null,
+      onPanUpdate: !_isForging ? (details) {
+        if (_spinnerCenter == null) return;
+        final localPos = details.localPosition;
+        final currentAngle = math.atan2(
+          localPos.dy - _spinnerCenter!.dy,
+          localPos.dx - _spinnerCenter!.dx,
+        );
+
+        // Calculate angle delta (handle wrap-around)
+        var delta = currentAngle - _lastTouchAngle;
+        if (delta > math.pi) delta -= 2 * math.pi;
+        if (delta < -math.pi) delta += 2 * math.pi;
+
+        // Accumulate velocity gradually (for acceleration feel)
+        setState(() {
+          _spinnerAngle += delta;
+          _spinnerVelocity = (_spinnerVelocity + delta * 30).clamp(-_maxVelocity, _maxVelocity);
+          _lastTouchAngle = currentAngle;
+        });
+
+        // Light haptic while spinning
+        if (delta.abs() > 0.05) {
+          HapticFeedback.selectionClick();
+        }
+      } : null,
+      onPanEnd: !_isForging ? (_) {
+        _isTouching = false;
+      } : null,
       child: AnimatedBuilder(
         animation: _glowAnimController,
         builder: (context, _) {
@@ -869,6 +941,30 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             animation: _completeAnimController,
             builder: (context, _) {
               final completeScale = 1.0 + 0.3 * _completeAnimController.value;
+
+              // Fidget spinner: calculate visual effects based on velocity
+              final spinnerSpeed = _spinnerVelocity.abs() / _maxVelocity; // 0.0 ~ 1.0
+              final isSpinning = !_isForging && spinnerSpeed > 0.01;
+
+              // Dynamic glow based on spinner speed (only when not forging)
+              final spinnerGlowIntensity = isSpinning
+                  ? 0.3 + spinnerSpeed * 0.7 // 0.3 ~ 1.0
+                  : glowIntensity;
+              final spinnerBlurRadius = isSpinning
+                  ? baseSize * (0.2 + spinnerSpeed * 0.5) // Bigger blur at high speed
+                  : (_isForging ? baseSize * 0.35 : baseSize * 0.15);
+              final spinnerSpreadRadius = isSpinning
+                  ? baseSize * (0.03 + spinnerSpeed * 0.15)
+                  : (_isForging ? baseSize * 0.06 : baseSize * 0.025);
+
+              // Color shifts from accent → cyan → white at max speed
+              final spinnerColor = isSpinning
+                  ? Color.lerp(
+                      yearConfig.accentColor,
+                      Color.lerp(Colors.cyan, Colors.white, spinnerSpeed),
+                      spinnerSpeed,
+                    )!
+                  : activeColor;
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
@@ -883,10 +979,23 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: activeColor.withValues(alpha: glowIntensity),
-                            blurRadius: _isForging ? baseSize * 0.35 : baseSize * 0.15,
-                            spreadRadius: _isForging ? baseSize * 0.06 : baseSize * 0.025,
+                            color: spinnerColor.withValues(alpha: spinnerGlowIntensity),
+                            blurRadius: spinnerBlurRadius,
+                            spreadRadius: spinnerSpreadRadius,
                           ),
+                          // Extra glow layers at high speed
+                          if (isSpinning && spinnerSpeed > 0.5)
+                            BoxShadow(
+                              color: Colors.cyan.withValues(alpha: spinnerSpeed * 0.4),
+                              blurRadius: baseSize * 0.4,
+                              spreadRadius: baseSize * 0.08,
+                            ),
+                          if (isSpinning && spinnerSpeed > 0.8)
+                            BoxShadow(
+                              color: Colors.white.withValues(alpha: spinnerSpeed * 0.3),
+                              blurRadius: baseSize * 0.6,
+                              spreadRadius: baseSize * 0.1,
+                            ),
                           // Extra inner glow when forging for more fire-like effect
                           if (_isForging)
                             BoxShadow(
@@ -899,15 +1008,20 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          // Progress ring
-                          SizedBox(
-                            width: ringSize,
-                            height: ringSize,
-                            child: CircularProgressIndicator(
-                              value: progress,
-                              strokeWidth: baseSize * 0.03,
-                              backgroundColor: Colors.white.withValues(alpha: 0.1),
-                              valueColor: AlwaysStoppedAnimation<Color>(activeColor),
+                          // Spinning ring (rotates with fidget spinner)
+                          Transform.rotate(
+                            angle: _spinnerAngle,
+                            child: SizedBox(
+                              width: ringSize,
+                              height: ringSize,
+                              child: CustomPaint(
+                                painter: _SpinnerRingPainter(
+                                  color: spinnerColor,
+                                  speed: spinnerSpeed,
+                                  progress: progress,
+                                  isForging: _isForging,
+                                ),
+                              ),
                             ),
                           ),
 
@@ -919,7 +1033,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                               shape: BoxShape.circle,
                               color: Colors.black.withValues(alpha: 0.7),
                               border: Border.all(
-                                color: activeColor.withValues(alpha: 0.5),
+                                color: spinnerColor.withValues(alpha: 0.5),
                                 width: baseSize * 0.01,
                               ),
                             ),
@@ -1128,6 +1242,244 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         ),
       ),
     );
+  }
+}
+
+/// Custom painter for the spinning ring with visible rotation markers
+class _SpinnerRingPainter extends CustomPainter {
+  final Color color;
+  final double speed; // 0.0 ~ 1.0
+  final double progress; // Forge progress (0.0 ~ 1.0)
+  final bool isForging;
+
+  _SpinnerRingPainter({
+    required this.color,
+    required this.speed,
+    required this.progress,
+    required this.isForging,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    final strokeWidth = size.width * 0.03;
+
+    // Base ring (background)
+    final basePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.1)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+    canvas.drawCircle(center, radius - strokeWidth / 2, basePaint);
+
+    // Progress arc (when forging)
+    if (isForging && progress > 0) {
+      final progressPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius - strokeWidth / 2),
+        -math.pi / 2,
+        progress * 2 * math.pi,
+        false,
+        progressPaint,
+      );
+    }
+
+    // Spinner markers (visible rotation) - only when not forging
+    if (!isForging) {
+      final markerCount = 8;
+      final markerLength = size.width * 0.08;
+      final markerWidth = 2.0 + speed * 3.0; // Thicker at high speed
+
+      for (int i = 0; i < markerCount; i++) {
+        final angle = (i / markerCount) * 2 * math.pi;
+        final startRadius = radius - strokeWidth * 1.5;
+        final endRadius = startRadius - markerLength;
+
+        // Gradient opacity: primary marker is brightest
+        final opacity = i == 0
+            ? 0.4 + speed * 0.6 // Primary marker: 0.4 ~ 1.0
+            : 0.1 + speed * 0.3; // Others: 0.1 ~ 0.4
+
+        final markerPaint = Paint()
+          ..color = color.withValues(alpha: opacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = markerWidth
+          ..strokeCap = StrokeCap.round;
+
+        final start = Offset(
+          center.dx + startRadius * math.cos(angle),
+          center.dy + startRadius * math.sin(angle),
+        );
+        final end = Offset(
+          center.dx + endRadius * math.cos(angle),
+          center.dy + endRadius * math.sin(angle),
+        );
+
+        canvas.drawLine(start, end, markerPaint);
+      }
+
+      // Speed trail effect at high speed (motion blur simulation)
+      if (speed > 0.5) {
+        final trailPaint = Paint()
+          ..color = color.withValues(alpha: speed * 0.3)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth * 0.5;
+
+        final sweepAngle = speed * math.pi * 0.5; // Up to 90 degrees trail
+        canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius - strokeWidth / 2),
+          0,
+          sweepAngle,
+          false,
+          trailPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpinnerRingPainter oldDelegate) {
+    return oldDelegate.color != color ||
+        oldDelegate.speed != speed ||
+        oldDelegate.progress != progress ||
+        oldDelegate.isForging != isForging;
+  }
+}
+
+/// Full-screen lightning/cyber effect when spinner reaches max speed
+class _CyberLightningOverlay extends StatelessWidget {
+  final double intensity; // 0.0 ~ 1.0
+  final double animation;
+
+  const _CyberLightningOverlay({
+    required this.intensity,
+    required this.animation,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (intensity < 0.7) return const SizedBox.shrink();
+
+    final effectIntensity = ((intensity - 0.7) / 0.3).clamp(0.0, 1.0);
+
+    return IgnorePointer(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _LightningPainter(
+          intensity: effectIntensity,
+          animation: animation,
+        ),
+      ),
+    );
+  }
+}
+
+/// Painter for lightning/cyber effect
+class _LightningPainter extends CustomPainter {
+  final double intensity;
+  final double animation;
+
+  _LightningPainter({
+    required this.intensity,
+    required this.animation,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final random = math.Random((animation * 100).toInt());
+
+    // Edge glow
+    final edgeGlowPaint = Paint()
+      ..shader = RadialGradient(
+        center: Alignment.center,
+        radius: 1.2,
+        colors: [
+          Colors.transparent,
+          Colors.cyan.withValues(alpha: intensity * 0.3),
+          Colors.cyan.withValues(alpha: intensity * 0.5),
+        ],
+        stops: const [0.5, 0.85, 1.0],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), edgeGlowPaint);
+
+    // Lightning bolts
+    final boltPaint = Paint()
+      ..color = Colors.cyan.withValues(alpha: intensity * 0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round;
+
+    final boltCount = (intensity * 8).toInt();
+    for (int i = 0; i < boltCount; i++) {
+      _drawLightningBolt(
+        canvas,
+        size,
+        boltPaint,
+        random,
+        Offset(
+          random.nextDouble() * size.width,
+          random.nextDouble() * size.height * 0.3,
+        ),
+      );
+    }
+
+    // Scan lines effect
+    final scanPaint = Paint()
+      ..color = Colors.cyan.withValues(alpha: intensity * 0.1);
+    for (double y = 0; y < size.height; y += 4) {
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        scanPaint,
+      );
+    }
+
+    // Random spark particles
+    final sparkPaint = Paint()
+      ..color = Colors.white.withValues(alpha: intensity * 0.9)
+      ..style = PaintingStyle.fill;
+    for (int i = 0; i < (intensity * 30).toInt(); i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final sparkSize = 1.0 + random.nextDouble() * 2.0;
+      canvas.drawCircle(Offset(x, y), sparkSize, sparkPaint);
+    }
+  }
+
+  void _drawLightningBolt(
+    Canvas canvas,
+    Size size,
+    Paint paint,
+    math.Random random,
+    Offset start,
+  ) {
+    final path = Path()..moveTo(start.dx, start.dy);
+    var current = start;
+    final segments = 5 + random.nextInt(5);
+
+    for (int i = 0; i < segments; i++) {
+      final dx = (random.nextDouble() - 0.5) * 60;
+      final dy = 20 + random.nextDouble() * 40;
+      current = Offset(
+        (current.dx + dx).clamp(0, size.width),
+        current.dy + dy,
+      );
+      path.lineTo(current.dx, current.dy);
+
+      if (current.dy > size.height) break;
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LightningPainter oldDelegate) {
+    return oldDelegate.intensity != intensity ||
+        oldDelegate.animation != animation;
   }
 }
 
