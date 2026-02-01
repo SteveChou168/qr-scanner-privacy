@@ -56,6 +56,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   // Gravity lock (easter egg within easter egg)
   bool _isGravityLocked = false;
   double _deviceAngle = 0.0;
+  double _lastDeviceAngle = 0.0; // For haptic feedback calculation
+  int _gravityHapticCounter = 0; // Throttle haptic feedback
   Orientation? _lockedOrientation; // Remember orientation when locked
   StreamSubscription<AccelerometerEvent>? _accelSubscription;
 
@@ -70,7 +72,13 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   double _lastTouchAngle = 0.0; // Last touch angle for delta calculation
   bool _isTouching = false; // Whether user is touching
   Offset? _spinnerCenter; // Center point for angle calculation
+  int _hapticCounter = 0; // Counter for periodic haptic feedback
+  final List<int> _rpmHistory = []; // History for ghost number effect
+  int _frozenRpm = 0; // RPM frozen when finger releases (record)
+  bool _rpmFrozen = false; // Whether RPM is currently frozen
+  static const int _rpmHistoryLength = 5; // Number of ghost frames
   static const double _maxVelocity = 50.0; // Max angular velocity
+  static const double _rpmScale = 60.0; // Scale factor for RPM display (50 * 60 = 3000 max)
   static const double _friction = 0.985; // Friction coefficient per frame
   static const double _velocityThreshold = 0.1; // Stop threshold
 
@@ -176,18 +184,50 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             if (!_isTouching && _spinnerVelocity.abs() > _velocityThreshold) {
               _spinnerAngle += _spinnerVelocity * (_backgroundFrameInterval / 1000);
               _spinnerVelocity *= _friction;
-
-              // Haptic feedback based on velocity
-              final absVelocity = _spinnerVelocity.abs();
-              if (absVelocity > _maxVelocity * 0.8) {
-                HapticFeedback.heavyImpact();
-              } else if (absVelocity > _maxVelocity * 0.5) {
-                HapticFeedback.mediumImpact();
-              } else if (absVelocity > _maxVelocity * 0.2) {
-                HapticFeedback.lightImpact();
-              }
             } else if (!_isTouching) {
               _spinnerVelocity = 0.0; // Stop completely below threshold
+            }
+
+            // Periodic haptic feedback while spinning (frequency based on speed)
+            final absVelocity = _spinnerVelocity.abs();
+            if (absVelocity > _velocityThreshold) {
+              _hapticCounter++;
+              // Higher speed = more frequent haptics
+              final hapticInterval = absVelocity > _maxVelocity * 0.7
+                  ? 2  // Every 2 frames (~66ms) at high speed
+                  : absVelocity > _maxVelocity * 0.4
+                      ? 4  // Every 4 frames (~132ms) at medium speed
+                      : 8; // Every 8 frames (~264ms) at low speed
+
+              if (_hapticCounter >= hapticInterval) {
+                _hapticCounter = 0;
+                if (absVelocity > _maxVelocity * 0.7) {
+                  HapticFeedback.mediumImpact();
+                } else {
+                  HapticFeedback.lightImpact();
+                }
+              }
+
+              // Update RPM history for ghost effect
+              int currentRpm = (absVelocity * _rpmScale).toInt();
+
+              // Occasional spike above 3000 when near max speed
+              if (currentRpm >= 2900 && math.Random().nextDouble() < 0.1) {
+                currentRpm = 3000 + math.Random().nextInt(50); // 3000-3049
+              }
+
+              _rpmHistory.insert(0, currentRpm);
+              if (_rpmHistory.length > _rpmHistoryLength) {
+                _rpmHistory.removeLast();
+              }
+
+              // When spinning, RPM is live (not frozen)
+              _rpmFrozen = false;
+            } else if (!_rpmFrozen && _rpmHistory.isNotEmpty) {
+              // Just stopped spinning - freeze the last RPM as a record
+              _frozenRpm = _rpmHistory.first;
+              _rpmFrozen = true;
+              // Keep history for ghost display
             }
           });
         }
@@ -295,6 +335,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
     }
 
     _accelSubscription?.cancel();
+    _lastDeviceAngle = _deviceAngle;
+    _gravityHapticCounter = 0;
+
     _accelSubscription = accelerometerEventStream(
       samplingPeriod: const Duration(milliseconds: 50), // 20Hz for smoothness
     ).listen((event) {
@@ -322,6 +365,30 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           setState(() {
             _deviceAngle += wrappedDiff * smoothingFactor;
           });
+
+          // Haptic feedback for gravity lock rotation
+          // Skip if spinner is actively spinning (to avoid conflict)
+          if (_spinnerVelocity.abs() < _velocityThreshold) {
+            _gravityHapticCounter++;
+
+            // Calculate rotation delta from last haptic check
+            final rotationDelta = (_deviceAngle - _lastDeviceAngle).abs();
+
+            // Trigger haptic based on rotation amount (throttled)
+            if (_gravityHapticCounter >= 3) { // Every ~150ms
+              _gravityHapticCounter = 0;
+
+              if (rotationDelta > 0.3) {
+                // Large rotation - medium impact
+                HapticFeedback.mediumImpact();
+                _lastDeviceAngle = _deviceAngle;
+              } else if (rotationDelta > 0.1) {
+                // Small rotation - light impact
+                HapticFeedback.lightImpact();
+                _lastDeviceAngle = _deviceAngle;
+              }
+            }
+          }
         }
       }
     });
@@ -428,7 +495,8 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           backgroundColor: Colors.black,
           body: GestureDetector(
             onTap: () {
-              if (!_isForging) {
+              // Can't exit while spinner is still spinning
+              if (!_isForging && _spinnerVelocity.abs() < _velocityThreshold) {
                 Navigator.of(context).pop();
               }
             },
@@ -471,10 +539,24 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         ),
                       ),
 
-                    // Fidget spinner lightning effect (when spinning fast)
-                    _CyberLightningOverlay(
-                      intensity: _spinnerVelocity.abs() / _maxVelocity,
-                      animation: _backgroundAnimValue,
+                    // Fidget spinner lightning effect radiating from center
+                    Builder(
+                      builder: (context) {
+                        // Calculate spinner center position on screen
+                        final screenSize = MediaQuery.of(context).size;
+                        final spinnerCenter = Offset(
+                          screenSize.width / 2,
+                          screenSize.height / 2 - 30, // Adjust for time area offset
+                        );
+                        final ringRadius = isLandscape ? 72.0 : 90.0; // ~ringSize / 2
+
+                        return _CyberLightningOverlay(
+                          intensity: _spinnerVelocity.abs() / _maxVelocity,
+                          animation: _backgroundAnimValue,
+                          center: spinnerCenter,
+                          ringRadius: ringRadius,
+                        );
+                      },
                     ),
                   ],
                 );
@@ -882,9 +964,10 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
     return GestureDetector(
       onTap: () {
-        if (!_isForging) {
+        // Can't start forge while spinner is still spinning
+        if (!_isForging && _spinnerVelocity.abs() < _velocityThreshold) {
           _startForge();
-        } else {
+        } else if (_isForging) {
           setState(() {
             _showTime = !_showTime;
           });
@@ -901,6 +984,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           localPos.dy - _spinnerCenter!.dy,
           localPos.dx - _spinnerCenter!.dx,
         );
+        // Reset frozen state when user starts spinning again
+        if (_rpmFrozen) {
+          _rpmFrozen = false;
+          _rpmHistory.clear();
+          _frozenRpm = 0;
+        }
       } : null,
       onPanUpdate: !_isForging ? (details) {
         if (_spinnerCenter == null) return;
@@ -957,11 +1046,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                   ? baseSize * (0.03 + spinnerSpeed * 0.15)
                   : (_isForging ? baseSize * 0.06 : baseSize * 0.025);
 
-              // Color shifts from accent → cyan → white at max speed
+              // Color shifts from accent (blue) → amber gold at max speed
+              const amberGold = Color(0xFFFFB300);
               final spinnerColor = isSpinning
                   ? Color.lerp(
-                      yearConfig.accentColor,
-                      Color.lerp(Colors.cyan, Colors.white, spinnerSpeed),
+                      yearConfig.accentColor, // Blue at low speed
+                      amberGold, // Amber gold at high speed
                       spinnerSpeed,
                     )!
                   : activeColor;
@@ -1093,11 +1183,183 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                       ],
                     ),
                   ),
+
+                  // RPM HUD Display (only when not forging and has RPM data)
+                  if (!_isForging && (_rpmHistory.isNotEmpty || _rpmFrozen))
+                    _buildRpmDisplay(baseSize, yearConfig),
                 ],
               );
             },
           );
         },
+      ),
+    );
+  }
+
+  /// Build the RPM HUD display with ghost numbers and glitch effect
+  Widget _buildRpmDisplay(double baseSize, YearConfig yearConfig) {
+    // Get current RPM (frozen or live)
+    final currentRpm = _rpmFrozen
+        ? _frozenRpm
+        : (_rpmHistory.isNotEmpty ? _rpmHistory.first : 0);
+
+    // Color tiers: 0-500 cyan, 500-2000 amber, 2000+ red
+    Color getRpmColor(int rpm) {
+      if (rpm < 500) {
+        return Colors.cyan;
+      } else if (rpm < 2000) {
+        // Interpolate cyan → amber (500-2000)
+        final t = (rpm - 500) / 1500;
+        return Color.lerp(Colors.cyan, const Color(0xFFFFB300), t)!;
+      } else {
+        // Interpolate amber → red (2000-3000)
+        final t = ((rpm - 2000) / 1000).clamp(0.0, 1.0);
+        return Color.lerp(const Color(0xFFFFB300), Colors.red, t)!;
+      }
+    }
+
+    // Font size increases with speed
+    double getRpmFontSize(int rpm) {
+      final base = baseSize * 0.12;
+      if (rpm < 500) {
+        return base;
+      } else if (rpm < 2000) {
+        return base * (1.0 + (rpm - 500) / 1500 * 0.3); // Up to 1.3x
+      } else {
+        return base * (1.3 + ((rpm - 2000) / 1000).clamp(0.0, 1.0) * 0.2); // Up to 1.5x
+      }
+    }
+
+    final rpmColor = getRpmColor(currentRpm);
+    final fontSize = getRpmFontSize(currentRpm);
+    final isHighSpeed = currentRpm >= 2000;
+
+    // Glitch effect for high speed
+    final glitchOffset = isHighSpeed && !_rpmFrozen
+        ? Offset(
+            (math.Random().nextDouble() - 0.5) * 4,
+            (math.Random().nextDouble() - 0.5) * 2,
+          )
+        : Offset.zero;
+
+    return Padding(
+      padding: EdgeInsets.only(top: baseSize * 0.05),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Ghost numbers (older RPM values fading out)
+          SizedBox(
+            height: baseSize * 0.15,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Ghost trail (older values)
+                for (int i = 1; i < _rpmHistory.length && i < _rpmHistoryLength; i++)
+                  Transform.translate(
+                    offset: Offset(0, -i * 3.0), // Stack upward
+                    child: Opacity(
+                      opacity: (1.0 - i / _rpmHistoryLength) * 0.3,
+                      child: Text(
+                        _rpmHistory[i].toString().padLeft(4, '0'),
+                        style: TextStyle(
+                          color: getRpmColor(_rpmHistory[i]).withValues(alpha: 0.3),
+                          fontSize: fontSize * 0.85,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Current RPM (main display)
+                Transform.translate(
+                  offset: glitchOffset,
+                  child: Stack(
+                    children: [
+                      // Glitch layer (offset red/cyan when high speed)
+                      if (isHighSpeed && !_rpmFrozen) ...[
+                        Transform.translate(
+                          offset: const Offset(-2, 0),
+                          child: Text(
+                            currentRpm.toString().padLeft(4, '0'),
+                            style: TextStyle(
+                              color: Colors.cyan.withValues(alpha: 0.5),
+                              fontSize: fontSize,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                        Transform.translate(
+                          offset: const Offset(2, 0),
+                          child: Text(
+                            currentRpm.toString().padLeft(4, '0'),
+                            style: TextStyle(
+                              color: Colors.red.withValues(alpha: 0.5),
+                              fontSize: fontSize,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+
+                      // Main number
+                      Text(
+                        currentRpm.toString().padLeft(4, '0'),
+                        style: TextStyle(
+                          color: _rpmFrozen ? rpmColor.withValues(alpha: 0.7) : rpmColor,
+                          fontSize: fontSize,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          shadows: [
+                            Shadow(
+                              color: rpmColor.withValues(alpha: 0.6),
+                              blurRadius: 8,
+                            ),
+                            if (isHighSpeed && !_rpmFrozen)
+                              Shadow(
+                                color: rpmColor.withValues(alpha: 0.8),
+                                blurRadius: 16,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // RPM label
+          Text(
+            'RPM',
+            style: TextStyle(
+              color: _rpmFrozen
+                  ? rpmColor.withValues(alpha: 0.4)
+                  : rpmColor.withValues(alpha: 0.6),
+              fontSize: baseSize * 0.05,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 2,
+            ),
+          ),
+
+          // Frozen indicator
+          if (_rpmFrozen)
+            Padding(
+              padding: EdgeInsets.only(top: baseSize * 0.02),
+              child: Text(
+                '◆ RECORD ◆',
+                style: TextStyle(
+                  color: rpmColor.withValues(alpha: 0.5),
+                  fontSize: baseSize * 0.04,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1350,21 +1612,25 @@ class _SpinnerRingPainter extends CustomPainter {
   }
 }
 
-/// Full-screen lightning/cyber effect when spinner reaches max speed
+/// Lightning/cyber effect radiating from spinner center
 class _CyberLightningOverlay extends StatelessWidget {
   final double intensity; // 0.0 ~ 1.0
   final double animation;
+  final Offset center; // Center of the spinner in screen coordinates
+  final double ringRadius; // Radius of the spinner ring
 
   const _CyberLightningOverlay({
     required this.intensity,
     required this.animation,
+    required this.center,
+    required this.ringRadius,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (intensity < 0.7) return const SizedBox.shrink();
+    if (intensity < 0.3) return const SizedBox.shrink();
 
-    final effectIntensity = ((intensity - 0.7) / 0.3).clamp(0.0, 1.0);
+    final effectIntensity = ((intensity - 0.3) / 0.7).clamp(0.0, 1.0);
 
     return IgnorePointer(
       child: CustomPaint(
@@ -1372,114 +1638,193 @@ class _CyberLightningOverlay extends StatelessWidget {
         painter: _LightningPainter(
           intensity: effectIntensity,
           animation: animation,
+          center: center,
+          ringRadius: ringRadius,
         ),
       ),
     );
   }
 }
 
-/// Painter for lightning/cyber effect
+/// Painter for energy effects radiating outward from center
+/// Uses energy ripples + few thick arcs for quality feel
 class _LightningPainter extends CustomPainter {
   final double intensity;
   final double animation;
+  final Offset center;
+  final double ringRadius;
+
+  // Amber gold color for high intensity
+  static const amberGold = Color(0xFFFFB300);
 
   _LightningPainter({
     required this.intensity,
     required this.animation,
+    required this.center,
+    required this.ringRadius,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final random = math.Random((animation * 100).toInt());
+    // Protect inner circle - clip out the center
+    canvas.save();
+    final innerRadius = ringRadius * 0.85;
+    canvas.clipPath(
+      Path()
+        ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+        ..addOval(Rect.fromCircle(center: center, radius: innerRadius))
+        ..fillType = PathFillType.evenOdd,
+    );
 
-    // Edge glow
-    final edgeGlowPaint = Paint()
-      ..shader = RadialGradient(
-        center: Alignment.center,
-        radius: 1.2,
-        colors: [
-          Colors.transparent,
-          Colors.cyan.withValues(alpha: intensity * 0.3),
-          Colors.cyan.withValues(alpha: intensity * 0.5),
-        ],
-        stops: const [0.5, 0.85, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), edgeGlowPaint);
+    // Color interpolation: cyan → amber gold based on intensity
+    final effectColor = Color.lerp(Colors.cyan, amberGold, intensity)!;
 
-    // Lightning bolts
-    final boltPaint = Paint()
-      ..color = Colors.cyan.withValues(alpha: intensity * 0.8)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round;
+    // 1. Energy ripples expanding outward
+    _drawEnergyRipples(canvas, effectColor);
 
-    final boltCount = (intensity * 8).toInt();
-    for (int i = 0; i < boltCount; i++) {
-      _drawLightningBolt(
-        canvas,
-        size,
-        boltPaint,
-        random,
-        Offset(
-          random.nextDouble() * size.width,
-          random.nextDouble() * size.height * 0.3,
-        ),
-      );
+    // 2. Few thick electric arcs (2-4 max)
+    if (intensity > 0.3) {
+      _drawThickArcs(canvas, size, effectColor);
     }
 
-    // Scan lines effect
-    final scanPaint = Paint()
-      ..color = Colors.cyan.withValues(alpha: intensity * 0.1);
-    for (double y = 0; y < size.height; y += 4) {
-      canvas.drawLine(
-        Offset(0, y),
-        Offset(size.width, y),
-        scanPaint,
-      );
-    }
+    // 3. Subtle outer glow
+    _drawOuterGlow(canvas, effectColor);
 
-    // Random spark particles
-    final sparkPaint = Paint()
-      ..color = Colors.white.withValues(alpha: intensity * 0.9)
-      ..style = PaintingStyle.fill;
-    for (int i = 0; i < (intensity * 30).toInt(); i++) {
-      final x = random.nextDouble() * size.width;
-      final y = random.nextDouble() * size.height;
-      final sparkSize = 1.0 + random.nextDouble() * 2.0;
-      canvas.drawCircle(Offset(x, y), sparkSize, sparkPaint);
+    canvas.restore();
+  }
+
+  void _drawEnergyRipples(Canvas canvas, Color effectColor) {
+    // 3-5 expanding ripples based on animation
+    final rippleCount = 3 + (intensity * 2).toInt();
+
+    for (int i = 0; i < rippleCount; i++) {
+      // Each ripple at different phase
+      final phase = (animation * 2 + i / rippleCount) % 1.0;
+
+      // Ripple expands from ring edge outward
+      final rippleRadius = ringRadius + (ringRadius * 3.0 * intensity * phase);
+
+      // Fade out as it expands
+      final rippleAlpha = (1.0 - phase) * intensity * 0.6;
+
+      if (rippleAlpha > 0.05) {
+        final ripplePaint = Paint()
+          ..color = effectColor.withValues(alpha: rippleAlpha)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0 + (1.0 - phase) * 3.0; // Thicker when closer
+
+        canvas.drawCircle(center, rippleRadius, ripplePaint);
+      }
     }
   }
 
-  void _drawLightningBolt(
+  void _drawThickArcs(Canvas canvas, Size size, Color effectColor) {
+    final random = math.Random((animation * 50).toInt());
+
+    // Only 2-4 arcs for quality feel
+    final arcCount = 2 + (intensity * 2).toInt().clamp(0, 2);
+
+    for (int i = 0; i < arcCount; i++) {
+      // Arc starting angle - spread evenly with some randomness
+      final baseAngle = (i / arcCount) * 2 * math.pi + animation * math.pi;
+      final startAngle = baseAngle + (random.nextDouble() - 0.5) * 0.5;
+
+      // Arc length increases with intensity
+      final arcLength = ringRadius * (1.5 + intensity * 3.0);
+
+      // Draw thick glowing arc
+      _drawSingleArc(
+        canvas,
+        size,
+        startAngle,
+        arcLength,
+        effectColor,
+        random,
+      );
+    }
+  }
+
+  void _drawSingleArc(
     Canvas canvas,
     Size size,
-    Paint paint,
+    double startAngle,
+    double maxLength,
+    Color color,
     math.Random random,
-    Offset start,
   ) {
-    final path = Path()..moveTo(start.dx, start.dy);
-    var current = start;
-    final segments = 5 + random.nextInt(5);
+    final path = Path();
+
+    // Start from ring edge
+    var current = Offset(
+      center.dx + ringRadius * math.cos(startAngle),
+      center.dy + ringRadius * math.sin(startAngle),
+    );
+    path.moveTo(current.dx, current.dy);
+
+    // 3-5 segments for smooth but jagged arc
+    final segments = 3 + random.nextInt(3);
+    final segmentLength = maxLength / segments;
+    var currentAngle = startAngle;
 
     for (int i = 0; i < segments; i++) {
-      final dx = (random.nextDouble() - 0.5) * 60;
-      final dy = 20 + random.nextDouble() * 40;
-      current = Offset(
-        (current.dx + dx).clamp(0, size.width),
-        current.dy + dy,
-      );
-      path.lineTo(current.dx, current.dy);
+      // Slight angle deviation for electric feel
+      currentAngle += (random.nextDouble() - 0.5) * 0.4;
+      final length = segmentLength * (0.8 + random.nextDouble() * 0.4);
 
-      if (current.dy > size.height) break;
+      current = Offset(
+        current.dx + length * math.cos(currentAngle),
+        current.dy + length * math.sin(currentAngle),
+      );
+
+      // Clamp to screen
+      current = Offset(
+        current.dx.clamp(0, size.width),
+        current.dy.clamp(0, size.height),
+      );
+
+      path.lineTo(current.dx, current.dy);
     }
 
-    canvas.drawPath(path, paint);
+    // Draw glow layer (wider, more transparent)
+    final glowPaint = Paint()
+      ..color = color.withValues(alpha: intensity * 0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 8.0 + intensity * 6.0
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+    canvas.drawPath(path, glowPaint);
+
+    // Draw core (thinner, brighter)
+    final corePaint = Paint()
+      ..color = Color.lerp(color, Colors.white, 0.5)!.withValues(alpha: 0.8 + intensity * 0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0 + intensity * 2.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, corePaint);
+  }
+
+  void _drawOuterGlow(Canvas canvas, Color effectColor) {
+    // Soft radial glow expanding from ring
+    final glowRadius = ringRadius * (1.5 + intensity * 2.5);
+
+    final glowPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          effectColor.withValues(alpha: intensity * 0.15),
+          effectColor.withValues(alpha: intensity * 0.05),
+          Colors.transparent,
+        ],
+        stops: const [0.3, 0.7, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: glowRadius));
+
+    canvas.drawCircle(center, glowRadius, glowPaint);
   }
 
   @override
   bool shouldRepaint(covariant _LightningPainter oldDelegate) {
     return oldDelegate.intensity != intensity ||
-        oldDelegate.animation != animation;
+        oldDelegate.animation != animation ||
+        oldDelegate.center != center;
   }
 }
 
