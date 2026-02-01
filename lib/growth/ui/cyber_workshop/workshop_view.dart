@@ -82,7 +82,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   static const int _baseMaxRpm = 6000; // Base max RPM
   static const double _phase1Duration = 20.0; // Seconds to reach 3000 RPM
   static const double _phase2Duration = 20.0; // Additional seconds to reach max (total 40s)
-  static const double _friction = 0.95; // Friction coefficient (faster deceleration)
+  // Friction: high speed = fast decay, low speed = slow tail
+  static const double _frictionHighSpeed = 0.92; // Fast decay at high RPM
+  static const double _frictionLowSpeed = 0.985; // Slow tail at low RPM
   static const double _velocityThreshold = 0.1; // Stop threshold
 
   @override
@@ -186,7 +188,11 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
             // Update fidget spinner physics (only when not touching and has velocity)
             if (!_isTouching && _spinnerVelocity.abs() > _velocityThreshold) {
               _spinnerAngle += _spinnerVelocity * (_backgroundFrameInterval / 1000);
-              _spinnerVelocity *= _friction;
+
+              // Variable friction: fast decay at high speed, slow tail at low speed
+              final speedRatio = (_spinnerVelocity.abs() / _maxVelocity).clamp(0.0, 1.0);
+              final friction = _frictionLowSpeed + (_frictionHighSpeed - _frictionLowSpeed) * speedRatio;
+              _spinnerVelocity *= friction;
             } else if (!_isTouching) {
               _spinnerVelocity = 0.0; // Stop completely below threshold
             }
