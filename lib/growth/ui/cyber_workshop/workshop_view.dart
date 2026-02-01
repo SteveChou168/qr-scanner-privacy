@@ -577,20 +577,6 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         ),
                       ),
 
-                    // Fidget spinner lightning effect (arcs radiating from center)
-                    if (_currentRpm > 500)
-                      Builder(
-                        builder: (context) {
-                          final screenSize = MediaQuery.of(context).size;
-                          final isLandscape = screenSize.width > screenSize.height;
-                          return _CyberLightningOverlay(
-                            rpm: _currentRpm,
-                            intensity: _spinnerVelocity.abs() / _maxVelocity,
-                            center: Offset(screenSize.width / 2, screenSize.height / 2),
-                            ringRadius: isLandscape ? 72.0 : 90.0,
-                          );
-                        },
-                      ),
                   ],
                 );
               },
@@ -1143,6 +1129,25 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                               ),
                             ),
                           ),
+
+                          // Lightning arcs (when spinning fast)
+                          if (_currentRpm > 500)
+                            SizedBox(
+                              width: outerSize,
+                              height: outerSize,
+                              child: CustomPaint(
+                                painter: _LightningPainter(
+                                  arcCount: _currentRpm < 3000
+                                      ? (_currentRpm / 750).floor().clamp(0, 4)
+                                      : 5 + ((_currentRpm - 3000) / 750).floor().clamp(0, 3),
+                                  intensity: spinnerSpeed,
+                                  center: Offset(outerSize / 2, outerSize / 2),
+                                  ringRadius: ringSize / 2,
+                                  innerRadius: innerSize / 2,
+                                  seed: DateTime.now().millisecondsSinceEpoch,
+                                ),
+                              ),
+                            ),
 
                           // Inner circle background
                           Container(
@@ -1697,53 +1702,13 @@ class _SpinnerRingPainter extends CustomPainter {
   }
 }
 
-/// Lightning arcs overlay for fidget spinner
-class _CyberLightningOverlay extends StatelessWidget {
-  final int rpm;
-  final double intensity;
-  final Offset center;
-  final double ringRadius;
-
-  const _CyberLightningOverlay({
-    required this.rpm,
-    required this.intensity,
-    required this.center,
-    required this.ringRadius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Arc count: 0-4 under 3000 RPM, 5-8 at 3000+
-    int arcCount;
-    if (rpm < 3000) {
-      arcCount = (rpm / 750).floor().clamp(0, 4); // 0-4 arcs
-    } else {
-      arcCount = 5 + ((rpm - 3000) / 750).floor().clamp(0, 3); // 5-8 arcs
-    }
-
-    if (arcCount == 0) return const SizedBox.shrink();
-
-    return IgnorePointer(
-      child: CustomPaint(
-        size: Size.infinite,
-        painter: _LightningPainter(
-          arcCount: arcCount,
-          intensity: intensity,
-          center: center,
-          ringRadius: ringRadius,
-          seed: DateTime.now().millisecondsSinceEpoch,
-        ),
-      ),
-    );
-  }
-}
-
 /// Painter for lightning arcs radiating from ring
 class _LightningPainter extends CustomPainter {
   final int arcCount;
   final double intensity;
   final Offset center;
   final double ringRadius;
+  final double innerRadius;
   final int seed;
 
   _LightningPainter({
@@ -1751,16 +1716,18 @@ class _LightningPainter extends CustomPainter {
     required this.intensity,
     required this.center,
     required this.ringRadius,
+    required this.innerRadius,
     required this.seed,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (arcCount <= 0) return;
+
     final random = math.Random(seed);
 
-    // Protect inner circle
+    // Protect inner circle - clip out the center
     canvas.save();
-    final innerRadius = ringRadius * 0.9;
     canvas.clipPath(
       Path()
         ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
@@ -1768,22 +1735,12 @@ class _LightningPainter extends CustomPainter {
         ..fillType = PathFillType.evenOdd,
     );
 
-    // Draw arcs
+    // Draw arcs radiating outward from ring
     for (int i = 0; i < arcCount; i++) {
       final startAngle = (i / arcCount) * 2 * math.pi + random.nextDouble() * 0.5;
-      final arcLength = ringRadius * (1.0 + intensity * 2.0);
+      final arcLength = ringRadius * (0.8 + intensity * 1.5);
       _drawArc(canvas, size, startAngle, arcLength, random);
     }
-
-    // Subtle outer glow
-    final glowPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          Colors.cyan.withValues(alpha: intensity * 0.1),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromCircle(center: center, radius: ringRadius * 2));
-    canvas.drawCircle(center, ringRadius * 2, glowPaint);
 
     canvas.restore();
   }
@@ -1791,6 +1748,7 @@ class _LightningPainter extends CustomPainter {
   void _drawArc(Canvas canvas, Size size, double startAngle, double maxLength, math.Random random) {
     final path = Path();
 
+    // Start from ring edge
     var current = Offset(
       center.dx + ringRadius * math.cos(startAngle),
       center.dy + ringRadius * math.sin(startAngle),
@@ -1816,16 +1774,16 @@ class _LightningPainter extends CustomPainter {
     final glowPaint = Paint()
       ..color = Colors.cyan.withValues(alpha: intensity * 0.4)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 6.0 + intensity * 4.0
+      ..strokeWidth = 5.0 + intensity * 3.0
       ..strokeCap = StrokeCap.round
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
     canvas.drawPath(path, glowPaint);
 
     // Core
     final corePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.7 + intensity * 0.3)
+      ..color = Colors.white.withValues(alpha: 0.6 + intensity * 0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5 + intensity * 1.5
+      ..strokeWidth = 1.5 + intensity * 1.0
       ..strokeCap = StrokeCap.round;
     canvas.drawPath(path, corePaint);
   }
