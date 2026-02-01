@@ -169,12 +169,28 @@ ScanScreen(isActive: _currentIndex == 0),
 
 ## 照片模式
 
-使用 `google_mlkit_barcode_scanning` 直接分析圖片：
+採用 **ML Kit + ZXing 並行掃描**，合併結果（ZXing 優先）：
+
 ```dart
-final inputImage = mlkit.InputImage.fromFilePath(imagePath);
-final barcodeScanner = mlkit.BarcodeScanner(formats: [mlkit.BarcodeFormat.all]);
-final barcodes = await barcodeScanner.processImage(inputImage);
-barcodeScanner.close();
+// 並行執行
+final results = await Future.wait([
+  _scanWithMLKit(path, bytes),
+  _scanWithZXing(path, bytes),
+]);
+
+// 合併：ZXing 優先
+final merged = <String, DetectedCode>{};
+for (final code in mlKitCodes) merged[code.rawValue] = code;
+for (final code in zxingCodes) merged[code.rawValue] = code;  // 覆蓋
 ```
 
-**注意**: 目前照片模式識別率仍有問題，待進一步優化。
+檔案位置：`lib/widgets/scan/scan_gallery_mode.dart`
+
+## MIG 4.0 發票掃描問題 ✅ 已解決
+
+2026年起台灣統一發票採用 MIG 4.0 格式，ML Kit 無法辨識，但 ZXing 可以。
+
+**關鍵修復**：flutter_zxing 的 `imageFormat` 預設是 `lum` 但內部傳 RGB，導致解碼失敗。
+需明確設定 `imageFormat: ImageFormat.rgb`。
+
+詳細記錄請參考：[MIG4.0.md](./MIG4.0.md)

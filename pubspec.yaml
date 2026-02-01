@@ -14,7 +14,8 @@ dependencies:
 
   # Scanning
   mobile_scanner: ^7.1.4
-  google_mlkit_barcode_scanning: ^0.12.0
+  google_mlkit_barcode_scanning: ^0.14.1
+  flutter_zxing: ^1.8.0  # ZXing fallback for MIG 4.0 invoices
 
   # Storage
   sqflite: ^2.3.0
@@ -45,6 +46,10 @@ dependencies:
   # Utils
   intl: ^0.20.0
   permission_handler: ^12.0.0
+  enough_convert: ^1.6.0  # Big5 codec for Taiwan e-invoice
+
+  # Sensors
+  sensors_plus: ^6.1.1
 
   # QR Generation
   qr_flutter: ^4.1.0

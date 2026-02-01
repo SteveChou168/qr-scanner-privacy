@@ -2,15 +2,16 @@
 
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart' as mlkit;
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
+import 'package:flutter_zxing/flutter_zxing.dart' as zxing;
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart' as mlkit;
 import 'package:provider/provider.dart';
 
 import '../../app_text.dart';
 import '../../data/models/scan_record.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/barcode_parser.dart';
-import '../../services/photo_scanner_utils.dart';
+import '../../services/taiwan_invoice_decoder.dart';
 import 'scan_models.dart';
 import 'scan_action_buttons.dart';
 import 'scan_ar_overlay.dart';
@@ -70,7 +71,7 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     }
   }
 
-  /// Scan the gallery image using ML Kit with triple-cut parallel processing
+  /// 並行掃描：ML Kit + ZXing 同時跑，合併結果
   Future<void> _scanImage() async {
     final path = widget.imagePath;
     final bytes = widget.imageBytes;
@@ -82,19 +83,31 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     const minDisplayTime = Duration(milliseconds: 400);
 
     try {
-      final barcodeScanner = mlkit.BarcodeScanner(formats: [
-        mlkit.BarcodeFormat.all,
+      debugPrint('📸 開始並行掃描: $path');
+
+      // 並行執行 ML Kit 和 ZXing
+      final results = await Future.wait([
+        _scanWithMLKit(path, bytes),
+        _scanWithZXing(path, bytes),
       ]);
 
-      // Full image scan with triple-cut parallel processing
-      final photoBarcodes = await PhotoScannerUtils.scanAllWithTripleCut(
-        path,
-        barcodeScanner,
-      );
+      final mlKitCodes = results[0];
+      final zxingCodes = results[1];
 
-      barcodeScanner.close();
+      debugPrint('ML Kit: ${mlKitCodes.length} 個, ZXing: ${zxingCodes.length} 個');
 
-      // Ensure minimum display time for smooth transition
+      // 合併結果：用 rawValue 做 key，ZXing 優先
+      final merged = <String, DetectedCode>{};
+      for (final code in mlKitCodes) {
+        merged[code.parsed.rawValue] = code;
+      }
+      for (final code in zxingCodes) {
+        merged[code.parsed.rawValue] = code;  // ZXing 覆蓋 ML Kit
+      }
+
+      final parsedCodes = merged.values.toList();
+
+      // Ensure minimum display time
       final elapsed = DateTime.now().difference(startTime);
       if (elapsed < minDisplayTime) {
         await Future.delayed(minDisplayTime - elapsed);
@@ -102,34 +115,6 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
 
       if (!mounted) return;
 
-      if (photoBarcodes.isEmpty) {
-        setState(() {
-          _detectedCodes = [];
-          _isScanning = false;
-        });
-        return;
-      }
-
-      // Process detected barcodes
-      final parsedCodes = <DetectedCode>[];
-
-      for (final photoBarcode in photoBarcodes) {
-        final rawValue = photoBarcode.barcode.rawValue;
-        if (rawValue == null || rawValue.isEmpty) continue;
-
-        final parsed = widget.parser.parse(
-          rawValue: rawValue,
-          format: _mlkitFormatToMsFormat(photoBarcode.barcode.format),
-        );
-
-        parsedCodes.add(DetectedCode(
-          parsed: parsed,
-          boundingBox: photoBarcode.originalBoundingBox,
-          imageData: bytes,
-        ));
-      }
-
-      // Play sound if codes found
       if (parsedCodes.isNotEmpty) {
         final settings = context.read<SettingsProvider>();
         if (settings.sound) {
@@ -137,18 +122,130 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
         }
       }
 
+      debugPrint('✅ 合併後: ${parsedCodes.length} 個碼 (耗時: ${DateTime.now().difference(startTime).inMilliseconds}ms)');
+
       setState(() {
         _detectedCodes = parsedCodes;
         _isScanning = false;
       });
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('Scan error: $e');
+      debugPrint('Stack: $stack');
       if (mounted) {
         setState(() => _isScanning = false);
       }
     }
   }
 
-  /// Convert ML Kit BarcodeFormat to mobile_scanner format
+  /// ML Kit 掃描
+  Future<List<DetectedCode>> _scanWithMLKit(String path, Uint8List bytes) async {
+    final codes = <DetectedCode>[];
+    mlkit.BarcodeScanner? scanner;
+
+    try {
+      debugPrint('ML Kit: 開始掃描...');
+      final inputImage = mlkit.InputImage.fromFilePath(path);
+      scanner = mlkit.BarcodeScanner(formats: [mlkit.BarcodeFormat.all]);
+      final barcodes = await scanner.processImage(inputImage);
+
+      debugPrint('ML Kit: 找到 ${barcodes.length} 個');
+
+      for (final barcode in barcodes) {
+        if (barcode.rawValue == null || barcode.rawValue!.isEmpty) continue;
+
+        final rawBytes = barcode.rawBytes;
+
+        // 檢查是否為台灣電子發票，用 Big5 解碼
+        String rawValue = barcode.rawValue!;
+        if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
+          rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
+          debugPrint('ML Kit: 台灣發票 Big5 解碼');
+        }
+
+        final parsed = widget.parser.parse(
+          rawValue: rawValue,
+          format: _mlkitFormatToMsFormat(barcode.format),
+        );
+
+        codes.add(DetectedCode(
+          parsed: parsed,
+          boundingBox: barcode.boundingBox,
+          imageData: bytes,
+          rawBytes: rawBytes,
+        ));
+      }
+    } catch (e) {
+      debugPrint('ML Kit error: $e');
+    } finally {
+      scanner?.close();
+    }
+
+    return codes;
+  }
+
+  /// ZXing 掃描
+  Future<List<DetectedCode>> _scanWithZXing(String path, Uint8List bytes) async {
+    final codes = <DetectedCode>[];
+
+    try {
+      debugPrint('ZXing: 開始掃描...');
+
+      final params = zxing.DecodeParams(
+        imageFormat: zxing.ImageFormat.rgb,
+        format: zxing.Format.any,
+        tryHarder: true,
+        tryRotate: true,
+        tryInverted: true,
+        isMultiScan: true,
+        maxSize: 9999,
+      );
+
+      final result = await zxing.zx.readBarcodesImagePathString(path, params);
+      debugPrint('ZXing: 找到 ${result.codes.length} 個');
+
+      for (final code in result.codes) {
+        if (code.text == null || code.text!.isEmpty) continue;
+
+        final rawBytes = code.rawBytes;
+
+        // 檢查是否為台灣電子發票，用 Big5 解碼
+        String rawValue = code.text!;
+        if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
+          rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
+          debugPrint('ZXing: 台灣發票 Big5 解碼');
+        }
+
+        final parsed = widget.parser.parse(
+          rawValue: rawValue,
+          format: _zxingFormatToMsFormat(code.format),
+        );
+
+        Rect? boundingBox;
+        if (code.position != null) {
+          final pos = code.position!;
+          boundingBox = Rect.fromLTRB(
+            pos.topLeftX.toDouble(),
+            pos.topLeftY.toDouble(),
+            pos.bottomRightX.toDouble(),
+            pos.bottomRightY.toDouble(),
+          );
+        }
+
+        codes.add(DetectedCode(
+          parsed: parsed,
+          boundingBox: boundingBox,
+          imageData: bytes,
+          rawBytes: rawBytes,
+        ));
+      }
+    } catch (e) {
+      debugPrint('ZXing error: $e');
+    }
+
+    return codes;
+  }
+
+  /// ML Kit BarcodeFormat -> mobile_scanner format
   ms.BarcodeFormat _mlkitFormatToMsFormat(mlkit.BarcodeFormat format) {
     return switch (format) {
       mlkit.BarcodeFormat.qrCode => ms.BarcodeFormat.qrCode,
@@ -164,6 +261,27 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
       mlkit.BarcodeFormat.itf => ms.BarcodeFormat.itf,
       mlkit.BarcodeFormat.codabar => ms.BarcodeFormat.codabar,
       mlkit.BarcodeFormat.code93 => ms.BarcodeFormat.code93,
+      _ => ms.BarcodeFormat.unknown,
+    };
+  }
+
+  /// Convert ZXing Format (int) to mobile_scanner format
+  ms.BarcodeFormat _zxingFormatToMsFormat(int? format) {
+    if (format == null) return ms.BarcodeFormat.unknown;
+    return switch (format) {
+      zxing.Format.qrCode => ms.BarcodeFormat.qrCode,
+      zxing.Format.dataMatrix => ms.BarcodeFormat.dataMatrix,
+      zxing.Format.pdf417 => ms.BarcodeFormat.pdf417,
+      zxing.Format.aztec => ms.BarcodeFormat.aztec,
+      zxing.Format.ean13 => ms.BarcodeFormat.ean13,
+      zxing.Format.ean8 => ms.BarcodeFormat.ean8,
+      zxing.Format.upca => ms.BarcodeFormat.upcA,
+      zxing.Format.upce => ms.BarcodeFormat.upcE,
+      zxing.Format.code128 => ms.BarcodeFormat.code128,
+      zxing.Format.code39 => ms.BarcodeFormat.code39,
+      zxing.Format.itf => ms.BarcodeFormat.itf,
+      zxing.Format.codabar => ms.BarcodeFormat.codabar,
+      zxing.Format.code93 => ms.BarcodeFormat.code93,
       _ => ms.BarcodeFormat.unknown,
     };
   }
@@ -383,20 +501,24 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
 
   Widget _buildResultBar() {
     final count = _detectedCodes.length;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.black.withAlpha(200),
+        color: Colors.green.withAlpha(230),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          const Icon(Icons.qr_code_2, color: Colors.white),
+          const Icon(Icons.qr_code_scanner, color: Colors.white),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               AppText.galleryFoundCodesTapToSelect(count),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],

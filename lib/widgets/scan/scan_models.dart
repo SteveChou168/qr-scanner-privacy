@@ -9,12 +9,14 @@ class DetectedCode {
   final ParsedBarcode parsed;
   final Rect? boundingBox;
   final Uint8List? imageData;
+  final Uint8List? rawBytes;  // Raw bytes for Big5 decoding (Taiwan invoice)
   final int frameCount; // Number of frames detected, for confidence display
 
   DetectedCode({
     required this.parsed,
     this.boundingBox,
     this.imageData,
+    this.rawBytes,
     this.frameCount = 1,
   });
 
@@ -22,12 +24,14 @@ class DetectedCode {
     ParsedBarcode? parsed,
     Rect? boundingBox,
     Uint8List? imageData,
+    Uint8List? rawBytes,
     int? frameCount,
   }) {
     return DetectedCode(
       parsed: parsed ?? this.parsed,
       boundingBox: boundingBox ?? this.boundingBox,
       imageData: imageData ?? this.imageData,
+      rawBytes: rawBytes ?? this.rawBytes,
       frameCount: frameCount ?? this.frameCount,
     );
   }
@@ -56,6 +60,7 @@ class AccumulatedCode {
         parsed: code.parsed,
         boundingBox: newCode.boundingBox,
         imageData: newCode.imageData ?? code.imageData,
+        rawBytes: newCode.rawBytes ?? code.rawBytes,
         frameCount: frameCount,
       );
     }
