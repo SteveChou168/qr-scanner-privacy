@@ -226,7 +226,12 @@ class _CyberForgeCardState extends State<CyberForgeCard>
     final cpBalance = service.cpBalance;
     final scanCount = service.todayScanCpCount;
     final adCount = service.todayAdCpCount;
+    final canInjectScan = service.canInjectScanCp;
+    final canInjectAd = service.canInjectAdCp;
     final canWatchAd = adCount < GrowthService.maxDailyAdCp;
+
+    // Amber gold color for injection buttons
+    const amberGold = Color(0xFFFFB300);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,30 +277,77 @@ class _CyberForgeCardState extends State<CyberForgeCard>
         ),
         const SizedBox(height: 6),
 
-        // Stats and boost button row
+        // Stats row with injection buttons
         Row(
           children: [
-            // Today's stats
-            Text(
-              '${AppText.cpScanCount}: $scanCount/${GrowthService.maxDailyScanCp}',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.5),
-                fontSize: 10,
-              ),
-            ),
+            // Scan stat or injection button
+            canInjectScan
+                ? GestureDetector(
+                    onTap: () => _onScanInjectTap(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: amberGold.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: amberGold,
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        '⚡ ${AppText.cpScanInject}',
+                        style: const TextStyle(
+                          color: amberGold,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                : Text(
+                    '${AppText.cpScanCount}: $scanCount/${GrowthService.maxDailyScanCp}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 10,
+                    ),
+                  ),
             const SizedBox(width: 12),
-            Text(
-              '${AppText.cpEnergyCount}: $adCount/${GrowthService.maxDailyAdCp}',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.5),
-                fontSize: 10,
-              ),
-            ),
-            const Spacer(),
-            const SizedBox(width: 8),
 
-            // Energy boost button
-            if (canWatchAd)
+            // Energy stat or injection button
+            canInjectAd
+                ? GestureDetector(
+                    onTap: () => _onEnergyInjectTap(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: amberGold.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: amberGold,
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        '⚡ ${AppText.cpEnergyInject}',
+                        style: const TextStyle(
+                          color: amberGold,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  )
+                : Text(
+                    '${AppText.cpEnergyCount}: $adCount/${GrowthService.maxDailyAdCp}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 10,
+                    ),
+                  ),
+            const Spacer(),
+
+            // Energy boost button (only show if not full)
+            if (canWatchAd && !canInjectAd)
               GestureDetector(
                 onTap: () => _onEnergyBoostTap(context),
                 child: Container(
@@ -332,6 +384,102 @@ class _CyberForgeCardState extends State<CyberForgeCard>
           ],
         ),
       ],
+    );
+  }
+
+  void _onScanInjectTap(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    _showInjectDialog(context, isScan: true);
+  }
+
+  void _onEnergyInjectTap(BuildContext context) {
+    HapticFeedback.mediumImpact();
+    _showInjectDialog(context, isScan: false);
+  }
+
+  Future<void> _showInjectDialog(BuildContext context, {required bool isScan}) async {
+    final service = GrowthService.instance;
+
+    // Perform injection
+    final result = isScan
+        ? await service.injectScanCp()
+        : await service.injectAdCp();
+
+    if (!result.isSuccess || !context.mounted) return;
+
+    // Amber gold color
+    const amberGold = Color(0xFFFFB300);
+
+    // Show reward dialog
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a1a),
+        shape: RoundedRectangleBorder(
+          side: const BorderSide(color: amberGold, width: 1.5),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          isScan ? AppText.cpInjectDialogScanTitle : AppText.cpInjectDialogEnergyTitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: amberGold,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '⚡',
+              style: TextStyle(fontSize: 48),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isScan ? AppText.cpInjectDialogScanMessage : AppText.cpInjectDialogEnergyMessage,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                AppText.cpInjectDialogReward(result.bonusDays),
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          Center(
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: TextButton.styleFrom(
+                foregroundColor: amberGold,
+              ),
+              child: Text(
+                AppText.cpInjectDialogConfirm,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -113,14 +113,20 @@ class GrowthService extends ChangeNotifier {
   /// Maximum forge sessions per day for CP.
   static const int maxDailyForgeCp = 5;
 
-  /// CP gained per scan.
-  static const double cpPerScan = 0.1;
+  /// CP gained per scan batch (20 scans = 2.0 CP).
+  static const double cpPerScanBatch = 2.0;
 
-  /// CP gained per ad.
-  static const double cpPerAd = 0.5;
+  /// CP gained per ad batch (2 ads = 1.0 CP).
+  static const double cpPerAdBatch = 1.0;
 
   /// CP gained per forge session (15 min timer).
   static const double cpPerForge = 0.2;
+
+  /// Whether scan injection is ready (20/20).
+  bool get canInjectScanCp => _state.todayScanCpCount >= maxDailyScanCp;
+
+  /// Whether ad/energy injection is ready (2/2).
+  bool get canInjectAdCp => _state.todayAdCpCount >= maxDailyAdCp;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // INITIALIZATION
@@ -275,11 +281,39 @@ class GrowthService extends ChangeNotifier {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// Reset daily CP counters if date has changed (app open past midnight).
+  /// Auto-injects any accumulated CP before resetting.
   Future<void> _resetIfNewDay() async {
     final today = DateTime.now().toIso8601String().substring(0, 10);
     if (_state.lastLoginDate != today) {
+      // Auto-inject accumulated CP before resetting (midnight auto-inject)
+      var newCpBalance = _state.cpBalance;
+      var bonusDays = 0;
+
+      // Inject scan CP if full (20/20)
+      if (_state.todayScanCpCount >= maxDailyScanCp) {
+        newCpBalance += cpPerScanBatch;
+      }
+
+      // Inject ad CP if full (2/2)
+      if (_state.todayAdCpCount >= maxDailyAdCp) {
+        newCpBalance += cpPerAdBatch;
+      }
+
+      // Convert CP to days if >= 1.0
+      while (newCpBalance >= 1.0) {
+        newCpBalance -= 1.0;
+        bonusDays += 1;
+      }
+
+      // Apply bonus days if any
+      if (bonusDays > 0) {
+        await _applyBonusDays(bonusDays);
+      }
+
+      // Reset for new day
       _state = _state.copyWith(
         lastLoginDate: today,
+        cpBalance: newCpBalance,
         todayScanCpCount: 0,
         todayAdCpCount: 0,
         todayScannedCodesJson: '[]',
@@ -290,12 +324,12 @@ class GrowthService extends ChangeNotifier {
     }
   }
 
-  /// Earn CP from scanning a code.
+  /// Record a scan for CP accumulation (does NOT add CP immediately).
   ///
-  /// Returns [CpResult] indicating success/failure and any bonus days.
-  /// - Each unique scan = +0.1 CP (max 20/day)
+  /// Returns [CpResult] indicating success/failure.
+  /// - Each unique scan increments count (max 20/day)
   /// - Same code only counts once per day
-  /// - When CP >= 1.0, converts to +1 day automatically
+  /// - CP is added when user manually injects (or auto-inject at midnight)
   Future<CpResult> earnScanCp(String rawText) async {
     if (!_isInitialized || _repository == null) {
       return CpResult.limitReached();
@@ -315,9 +349,39 @@ class GrowthService extends ChangeNotifier {
       return CpResult.duplicate();
     }
 
-    // Add CP
+    // Only increment count, don't add CP yet
     final newScannedCodes = {...scannedCodes, rawText};
-    var newCpBalance = _state.cpBalance + cpPerScan;
+
+    _state = _state.copyWith(
+      todayScanCpCount: _state.todayScanCpCount + 1,
+      todayScannedCodesJson: _encodeCodes(newScannedCodes),
+    );
+
+    await _repository!.saveState(_state);
+    notifyListeners();
+
+    return CpResult.success(
+      cpGained: 0.0, // No immediate CP
+      bonusDays: 0,
+      newCpBalance: _state.cpBalance,
+    );
+  }
+
+  /// Inject accumulated scan CP (when 20/20 is reached).
+  ///
+  /// Returns [CpResult] with bonus days from the 2.0 CP injection.
+  Future<CpResult> injectScanCp() async {
+    if (!_isInitialized || _repository == null) {
+      return CpResult.limitReached();
+    }
+
+    // Must have full 20 scans to inject
+    if (_state.todayScanCpCount < maxDailyScanCp) {
+      return CpResult.limitReached();
+    }
+
+    // Add 2.0 CP (20 scans * 0.1 each)
+    var newCpBalance = _state.cpBalance + cpPerScanBatch;
     var bonusDays = 0;
 
     // Convert CP to days if >= 1.0
@@ -331,27 +395,28 @@ class GrowthService extends ChangeNotifier {
       await _applyBonusDays(bonusDays);
     }
 
-    // Update CP state
+    // Reset scan count after injection
     _state = _state.copyWith(
       cpBalance: newCpBalance,
-      todayScanCpCount: _state.todayScanCpCount + 1,
-      todayScannedCodesJson: _encodeCodes(newScannedCodes),
+      todayScanCpCount: 0,
+      todayScannedCodesJson: '[]',
     );
 
     await _repository!.saveState(_state);
     notifyListeners();
 
     return CpResult.success(
-      cpGained: cpPerScan,
+      cpGained: cpPerScanBatch,
       bonusDays: bonusDays,
       newCpBalance: newCpBalance,
     );
   }
 
-  /// Earn CP from watching an ad.
+  /// Record an ad watch for CP accumulation (does NOT add CP immediately).
   ///
-  /// Returns [CpResult] indicating success/failure and any bonus days.
-  /// - Each ad = +0.5 CP (max 2/day)
+  /// Returns [CpResult] indicating success/failure.
+  /// - Each ad increments count (max 2/day)
+  /// - CP is added when user manually injects (or auto-inject at midnight)
   Future<CpResult> earnAdCp() async {
     if (!_isInitialized || _repository == null) {
       return CpResult.limitReached();
@@ -365,8 +430,36 @@ class GrowthService extends ChangeNotifier {
       return CpResult.limitReached();
     }
 
-    // Add CP
-    var newCpBalance = _state.cpBalance + cpPerAd;
+    // Only increment count, don't add CP yet
+    _state = _state.copyWith(
+      todayAdCpCount: _state.todayAdCpCount + 1,
+    );
+
+    await _repository!.saveState(_state);
+    notifyListeners();
+
+    return CpResult.success(
+      cpGained: 0.0, // No immediate CP
+      bonusDays: 0,
+      newCpBalance: _state.cpBalance,
+    );
+  }
+
+  /// Inject accumulated ad/energy CP (when 2/2 is reached).
+  ///
+  /// Returns [CpResult] with bonus days from the 1.0 CP injection.
+  Future<CpResult> injectAdCp() async {
+    if (!_isInitialized || _repository == null) {
+      return CpResult.limitReached();
+    }
+
+    // Must have full 2 ads to inject
+    if (_state.todayAdCpCount < maxDailyAdCp) {
+      return CpResult.limitReached();
+    }
+
+    // Add 1.0 CP (2 ads * 0.5 each)
+    var newCpBalance = _state.cpBalance + cpPerAdBatch;
     var bonusDays = 0;
 
     // Convert CP to days if >= 1.0
@@ -380,17 +473,17 @@ class GrowthService extends ChangeNotifier {
       await _applyBonusDays(bonusDays);
     }
 
-    // Update CP state
+    // Reset ad count after injection
     _state = _state.copyWith(
       cpBalance: newCpBalance,
-      todayAdCpCount: _state.todayAdCpCount + 1,
+      todayAdCpCount: 0,
     );
 
     await _repository!.saveState(_state);
     notifyListeners();
 
     return CpResult.success(
-      cpGained: cpPerAd,
+      cpGained: cpPerAdBatch,
       bonusDays: bonusDays,
       newCpBalance: newCpBalance,
     );

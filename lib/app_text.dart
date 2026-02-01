@@ -516,7 +516,7 @@ class AppText {
   static String get noteHint => _v('輸入備註（會顯示在 QR 碼下方）', 'Add note (shown below QR code)', 'メモを入力（QRコードの下に表示）', 'Añadir nota (se muestra debajo)', 'Adicionar nota (mostrada abaixo)', '메모 입력 (QR 코드 아래 표시)', 'Thêm ghi chú (hiện bên dưới mã QR)');
 
   // ============ Ads ============
-  static String adRemainingQuota(int n) => _v('今日剩餘 $n 次', '$n left today', '本日残り $n 回', '$n restantes hoy', '$n restantes hoje', '오늘 $n회 남음', 'Còn $n lần hôm nay');
+  static String adRemainingQuota(int n) => _v('今日額度：$n', 'Today: $n', '本日：$n 回', 'Hoy: $n', 'Hoje: $n', '오늘: $n', 'Hôm nay: $n');
   static String get adQuotaExhaustedTitle => _v('今日免費次數已用完', 'Free quota exhausted', '本日の無料回数を使い切りました', 'Cuota gratuita agotada', 'Cota gratuita esgotada', '오늘 무료 횟수 소진', 'Đã hết lượt miễn phí hôm nay');
   static String get adQuotaExhaustedMessage => _v(
     '觀看廣告可獲得額外使用次數\n\n⚠️ 廣告開始後須看完才能關閉',
@@ -527,20 +527,35 @@ class AppText {
     '광고를 보고 추가 사용 횟수를 받으세요\n\n⚠️ 시작 후 끝까지 시청해야 합니다',
     'Xem quảng cáo để có thêm lượt dùng\n\n⚠️ Sau khi bắt đầu phải xem hết',
   );
-  static String get adWatchAd => _v('觀看廣告', 'Watch Ad', '広告を見る', 'Ver anuncio', 'Ver anúncio', '광고 보기', 'Xem quảng cáo');
+  static String get adWatchAd => _v('看廣告', 'Watch Ad', '広告を見る', 'Ver anuncio', 'Ver anúncio', '광고 보기', 'Xem quảng cáo');
+  static String get adWatchLater => _v('晚點看', 'Later', 'あとで', 'Luego', 'Depois', '나중에', 'Để sau');
+
+  // Usage confirmation dialog
+  static String get adUseConfirmTitle => _v('使用確認', 'Confirm', '確認', 'Confirmar', 'Confirmar', '확인', 'Xác nhận');
+  static String get adUseConfirmMessage => _v(
+    '此操作將使用 1 次額度。每一次使用都是對開發者的小小鼓勵！',
+    'This will use 1 credit. Every use is a little encouragement to the developer!',
+    'この操作で1回分を使用します。ご利用は開発者への小さな応援です！',
+    'Esto usará 1 crédito. ¡Cada uso es un pequeño apoyo al desarrollador!',
+    'Isso usará 1 crédito. Cada uso é um pequeno incentivo ao desenvolvedor!',
+    '1회를 사용합니다. 사용할 때마다 개발자에게 작은 응원이 됩니다!',
+    'Thao tác này sẽ dùng 1 lượt. Mỗi lần sử dụng là sự động viên nhỏ dành cho nhà phát triển!',
+  );
+  static String get adUseConfirmYes => _v('確定使用', 'Use it', '使用する', 'Usar', 'Usar', '사용', 'Sử dụng');
+  static String get adUseConfirmNo => _v('下次再說', 'Maybe later', 'また今度', 'Quizás luego', 'Talvez depois', '다음에', 'Để sau');
   static String adRewardReceived(int n) => _v('已獲得 $n 次額外使用次數！', 'Got $n extra uses!', '$n回分の追加利用を獲得しました！', '¡$n usos extra obtenidos!', '$n usos extras obtidos!', '$n회 추가 사용 획득!', 'Đã nhận $n lượt dùng thêm!');
   static String get adBonusRewardTitle => _v('幸運加倍！', 'Lucky Bonus!', 'ラッキーボーナス！', '¡Bonus de suerte!', 'Bônus de sorte!', '행운 보너스!', 'Thưởng may mắn!');
   static String adBonusRewardMessage(int n) => _v('恭喜獲得 $n 次額外使用次數！', 'Congratulations! You got $n extra uses!', 'おめでとう！$n回分の追加利用を獲得！', '¡Felicidades! ¡$n usos extra!', 'Parabéns! $n usos extras!', '축하합니다! $n회 추가 사용!', 'Chúc mừng! Nhận $n lượt dùng thêm!');
   static String get adNoThanks => _v('不用了', 'No thanks', '結構です', 'No, gracias', 'Não, obrigado', '괜찮습니다', 'Không, cảm ơn');
-  static String get adGetExtraQuotaTitle => _v('獲取額外次數', 'Get Extra Uses', '追加利用を獲得', 'Obtener más usos', 'Obter mais usos', '추가 사용 횟수 받기', 'Nhận thêm lượt dùng');
+  static String get adGetExtraQuotaTitle => _v('獲得額外使用額度', 'Get Extra Credits', '追加額度を獲得', 'Obtener créditos extra', 'Obter créditos extras', '추가 크레딧 받기', 'Nhận thêm lượt dùng');
   static String get adGetExtraQuotaMessage => _v(
-    '觀看廣告可隨機獲得 1~3 次額外使用次數。\n每日使用次數將於隔日重置為 3 次。\n\n⚠️ 廣告開始後須看完才能關閉',
-    'Watch an ad to get 1-3 extra uses randomly.\nDaily uses reset to 3 each day.\n\n⚠️ Once started, ad must be watched to completion',
-    '広告を視聴すると1〜3回の追加利用をランダムで獲得できます。\n毎日の利用回数は翌日3回にリセットされます。\n\n⚠️ 広告開始後は最後まで視聴が必要です',
-    'Ver un anuncio para obtener 1-3 usos extra.\nLos usos se reinician a 3 cada día.\n\n⚠️ Una vez iniciado, debe verse completo',
-    'Assista um anúncio para obter 1-3 usos extras.\nOs usos reiniciam para 3 a cada dia.\n\n⚠️ Após iniciar, deve assistir até o fim',
-    '광고를 보면 1~3회 추가 사용이 랜덤으로 주어집니다.\n매일 사용 횟수는 3회로 초기화됩니다.\n\n⚠️ 시작 후 끝까지 시청해야 합니다',
-    'Xem quảng cáo để nhận 1-3 lượt dùng thêm.\nLượt dùng mỗi ngày được đặt lại về 3.\n\n⚠️ Sau khi bắt đầu phải xem hết',
+    '完整觀看廣告即可獲得 1~3 次額外額度，這也是支持我們持續改進的方式 ✨\n\n每日額度將於隔日重置為 3 次。',
+    'Watch an ad to get 1-3 extra credits. It\'s a simple way to support our improvement ✨\n\nDaily credits reset to 3 each day.',
+    '広告を視聴すると1〜3回の追加額度がもらえます。これは私たちを応援する方法です ✨\n\n毎日の額度は翌日3回にリセットされます。',
+    'Mira un anuncio para obtener 1-3 créditos extra. Es una forma de apoyarnos ✨\n\nLos créditos se reinician a 3 cada día.',
+    'Assista um anúncio para obter 1-3 créditos extras. É uma forma de nos apoiar ✨\n\nOs créditos reiniciam para 3 cada dia.',
+    '광고를 보면 1~3회 추가 크레딧을 받을 수 있습니다. 저희를 응원하는 방법이에요 ✨\n\n매일 크레딧은 3회로 초기화됩니다.',
+    'Xem quảng cáo để nhận 1-3 lượt dùng thêm. Đây là cách hỗ trợ chúng tôi ✨\n\nLượt dùng được đặt lại về 3 mỗi ngày.',
   );
   static String get adDailyLimitReachedTitle => _v('感謝你的熱心支持', 'Thanks for your support', 'ご支援ありがとうございます', 'Gracias por tu apoyo', 'Obrigado pelo apoio', '응원 감사합니다', 'Cảm ơn sự ủng hộ');
   static String get adDailyLimitReachedMessage => _v(
@@ -599,6 +614,16 @@ class AppText {
     '⚡ Đã tiêm +$cp CP! Tiến độ đã đồng bộ.',
   );
   static String get cpLimitReached => _v('今日已達上限', 'Daily limit reached', '本日の上限に達しました', 'Límite diario alcanzado', 'Limite diário atingido', '일일 한도 도달', 'Đã đạt giới hạn hôm nay');
+
+  // CP Injection System
+  static String get cpScanInject => _v('解析注入', 'Inject', '注入', 'Inyectar', 'Injetar', '주입', 'Tiêm');
+  static String get cpEnergyInject => _v('能源注入', 'Inject', '注入', 'Inyectar', 'Injetar', '주입', 'Tiêm');
+  static String get cpInjectDialogScanTitle => _v('數據注入', 'DATA INJECTED', 'データ注入', 'DATOS INYECTADOS', 'DADOS INJETADOS', '데이터 주입', 'ĐÃ TIÊM DỮ LIỆU');
+  static String get cpInjectDialogEnergyTitle => _v('能源注入', 'ENERGY INJECTED', 'エネルギー注入', 'ENERGÍA INYECTADA', 'ENERGIA INJETADA', '에너지 주입', 'ĐÃ TIÊM NĂNG LƯỢNG');
+  static String get cpInjectDialogScanMessage => _v('掃描數據已同步', 'Scan data synced', 'スキャンデータ同期完了', 'Datos sincronizados', 'Dados sincronizados', '스캔 데이터 동기화됨', 'Dữ liệu đã đồng bộ');
+  static String get cpInjectDialogEnergyMessage => _v('能源充電完成', 'Energy charged', '充電完了', 'Energía cargada', 'Energia carregada', '충전 완료', 'Đã nạp năng lượng');
+  static String cpInjectDialogReward(int days) => _v('進度 +$days 天', 'Progress +$days days', '進捗 +$days日', 'Progreso +$days días', 'Progresso +$days dias', '진행 +$days일', 'Tiến độ +$days ngày');
+  static String get cpInjectDialogConfirm => _v('查收', 'OK', '確認', 'OK', 'OK', '확인', 'OK');
 
   // ============ Forge System (Hidden Easter Egg) ============
   static String get forgeStatus => _v('鍛造中', 'FORGING', '鍛造中', 'FORJANDO', 'FORJANDO', '단조 중', 'ĐANG RÈN');
