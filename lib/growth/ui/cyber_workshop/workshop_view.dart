@@ -76,9 +76,13 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
   final List<int> _rpmHistory = []; // History for ghost number effect
   int _frozenRpm = 0; // RPM frozen when finger releases (record)
   bool _rpmFrozen = false; // Whether RPM is currently frozen
+  double _spinDuration = 0.0; // How long user has been spinning (seconds)
+  int _sessionHighRpm = 0; // Highest RPM in current session
   static const int _rpmHistoryLength = 5; // Number of ghost frames
   static const double _maxVelocity = 50.0; // Max angular velocity
-  static const double _rpmScale = 60.0; // Scale factor for RPM display (50 * 60 = 3000 max)
+  static const double _rpmScale = 60.0; // Base scale: velocity to RPM (50 * 60 = 3000 base max)
+  static const int _baseMaxRpm = 6000; // Base max RPM
+  static const double _durationBonusTime = 30.0; // Seconds to reach max duration bonus
   static const double _friction = 0.985; // Friction coefficient per frame
   static const double _velocityThreshold = 0.1; // Stop threshold
 
@@ -208,12 +212,37 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 }
               }
 
-              // Update RPM history for ghost effect
-              int currentRpm = (absVelocity * _rpmScale).toInt();
+              // Track spin duration
+              _spinDuration += _backgroundFrameInterval / 1000;
 
-              // Occasional spike above 3000 when near max speed
-              if (currentRpm >= 2900 && math.Random().nextDouble() < 0.1) {
-                currentRpm = 3000 + math.Random().nextInt(50); // 3000-3049
+              // Dynamic max RPM based on login days (6000 + totalDays)
+              final totalDays = GrowthService.instance.totalDays;
+              final dynamicMaxRpm = _baseMaxRpm + totalDays;
+
+              // Update RPM history for ghost effect
+              // Base RPM from velocity (0-3000)
+              final baseRpm = absVelocity * _rpmScale;
+
+              // Duration bonus: linearly increase up to +3000 over 30 seconds
+              final durationFactor = (_spinDuration / _durationBonusTime).clamp(0.0, 1.0);
+              final durationBonus = durationFactor * 3000.0;
+
+              // Combined RPM
+              int currentRpm = (baseRpm + durationBonus).toInt();
+
+              // When near max, use random range (maxRpm - 50) to (maxRpm - 1)
+              if (currentRpm >= dynamicMaxRpm - 100) {
+                final minRange = dynamicMaxRpm - 50;
+                final maxRange = dynamicMaxRpm - 1;
+                currentRpm = minRange + math.Random().nextInt(maxRange - minRange + 1);
+              }
+
+              // Clamp to dynamic max
+              currentRpm = currentRpm.clamp(0, dynamicMaxRpm - 1);
+
+              // Track session high
+              if (currentRpm > _sessionHighRpm) {
+                _sessionHighRpm = currentRpm;
               }
 
               _rpmHistory.insert(0, currentRpm);
@@ -227,7 +256,12 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
               // Just stopped spinning - freeze the last RPM as a record
               _frozenRpm = _rpmHistory.first;
               _rpmFrozen = true;
+              // Reset duration for next spin session
+              _spinDuration = 0.0;
               // Keep history for ghost display
+            } else if (_spinnerVelocity.abs() <= _velocityThreshold) {
+              // Fully stopped - reset duration
+              _spinDuration = 0.0;
             }
           });
         }
@@ -539,25 +573,11 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                         ),
                       ),
 
-                    // Fidget spinner lightning effect radiating from center
-                    Builder(
-                      builder: (context) {
-                        // Calculate spinner center position on screen
-                        final screenSize = MediaQuery.of(context).size;
-                        final spinnerCenter = Offset(
-                          screenSize.width / 2,
-                          screenSize.height / 2 - 30, // Adjust for time area offset
-                        );
-                        final ringRadius = isLandscape ? 72.0 : 90.0; // ~ringSize / 2
-
-                        return _CyberLightningOverlay(
-                          intensity: _spinnerVelocity.abs() / _maxVelocity,
-                          animation: _backgroundAnimValue,
-                          center: spinnerCenter,
-                          ringRadius: ringRadius,
-                        );
-                      },
-                    ),
+                    // Fidget spinner glow effect (simple cyan glow from center)
+                    if (_spinnerVelocity.abs() / _maxVelocity > 0.3)
+                      _CyberGlowOverlay(
+                        intensity: _spinnerVelocity.abs() / _maxVelocity,
+                      ),
                   ],
                 );
               },
@@ -989,6 +1009,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           _rpmFrozen = false;
           _rpmHistory.clear();
           _frozenRpm = 0;
+          // Keep session high - don't reset it until they leave the screen
         }
       } : null,
       onPanUpdate: !_isForging ? (details) {
@@ -1203,36 +1224,41 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
         ? _frozenRpm
         : (_rpmHistory.isNotEmpty ? _rpmHistory.first : 0);
 
-    // Color tiers: 0-500 cyan, 500-2000 amber, 2000+ red
+    // Color tiers for 0-6000 range: cyan throughout (cold, clean aesthetic)
+    // Slight intensity increase at higher speeds
     Color getRpmColor(int rpm) {
-      if (rpm < 500) {
+      if (rpm < 1000) {
         return Colors.cyan;
-      } else if (rpm < 2000) {
-        // Interpolate cyan → amber (500-2000)
-        final t = (rpm - 500) / 1500;
-        return Color.lerp(Colors.cyan, const Color(0xFFFFB300), t)!;
+      } else if (rpm < 3000) {
+        // Slightly brighter cyan
+        final t = (rpm - 1000) / 2000;
+        return Color.lerp(Colors.cyan, const Color(0xFF00E5FF), t)!; // Cyan accent
       } else {
-        // Interpolate amber → red (2000-3000)
-        final t = ((rpm - 2000) / 1000).clamp(0.0, 1.0);
-        return Color.lerp(const Color(0xFFFFB300), Colors.red, t)!;
+        // Intense cyan with hint of white at very high RPM
+        final t = ((rpm - 3000) / 3000).clamp(0.0, 1.0);
+        return Color.lerp(const Color(0xFF00E5FF), const Color(0xFF80FFFF), t)!;
       }
     }
 
-    // Font size increases with speed
+    // Font size increases with speed (scaled for 6000 max)
     double getRpmFontSize(int rpm) {
       final base = baseSize * 0.12;
-      if (rpm < 500) {
+      if (rpm < 1000) {
         return base;
-      } else if (rpm < 2000) {
-        return base * (1.0 + (rpm - 500) / 1500 * 0.3); // Up to 1.3x
+      } else if (rpm < 3000) {
+        return base * (1.0 + (rpm - 1000) / 2000 * 0.25); // Up to 1.25x
       } else {
-        return base * (1.3 + ((rpm - 2000) / 1000).clamp(0.0, 1.0) * 0.2); // Up to 1.5x
+        return base * (1.25 + ((rpm - 3000) / 3000).clamp(0.0, 1.0) * 0.25); // Up to 1.5x
       }
     }
 
     final rpmColor = getRpmColor(currentRpm);
     final fontSize = getRpmFontSize(currentRpm);
-    final isHighSpeed = currentRpm >= 2000;
+    final isHighSpeed = currentRpm >= 4000;
+
+    // Dynamic max RPM based on login days
+    final totalDays = GrowthService.instance.totalDays;
+    final dynamicMaxRpm = _baseMaxRpm + totalDays;
 
     // Glitch effect for high speed
     final glitchOffset = isHighSpeed && !_rpmFrozen
@@ -1242,7 +1268,9 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
           )
         : Offset.zero;
 
-    return Padding(
+    return GestureDetector(
+      onTap: () => _showRpmRecord(dynamicMaxRpm),
+      child: Padding(
       padding: EdgeInsets.only(top: baseSize * 0.05),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1276,14 +1304,14 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                   offset: glitchOffset,
                   child: Stack(
                     children: [
-                      // Glitch layer (offset red/cyan when high speed)
+                      // Glitch layer (offset cyan shades when high speed)
                       if (isHighSpeed && !_rpmFrozen) ...[
                         Transform.translate(
                           offset: const Offset(-2, 0),
                           child: Text(
                             currentRpm.toString().padLeft(4, '0'),
                             style: TextStyle(
-                              color: Colors.cyan.withValues(alpha: 0.5),
+                              color: const Color(0xFF00FFFF).withValues(alpha: 0.4),
                               fontSize: fontSize,
                               fontWeight: FontWeight.bold,
                               fontFamily: 'monospace',
@@ -1295,7 +1323,7 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                           child: Text(
                             currentRpm.toString().padLeft(4, '0'),
                             style: TextStyle(
-                              color: Colors.red.withValues(alpha: 0.5),
+                              color: const Color(0xFF80FFFF).withValues(alpha: 0.4),
                               fontSize: fontSize,
                               fontWeight: FontWeight.bold,
                               fontFamily: 'monospace',
@@ -1359,6 +1387,100 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
                 ),
               ),
             ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  /// Show RPM record dialog
+  void _showRpmRecord(int dynamicMaxRpm) {
+    final totalDays = GrowthService.instance.totalDays;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.black.withValues(alpha: 0.9),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: Colors.cyan.withValues(alpha: 0.5)),
+        ),
+        title: Text(
+          '⚡ RPM RECORD ⚡',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.cyan,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 2,
+            shadows: [
+              Shadow(color: Colors.cyan.withValues(alpha: 0.5), blurRadius: 8),
+            ],
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Session high
+            Text(
+              'SESSION HIGH',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 10,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _sessionHighRpm.toString().padLeft(4, '0'),
+              style: TextStyle(
+                color: Colors.cyan,
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                shadows: [
+                  Shadow(color: Colors.cyan.withValues(alpha: 0.6), blurRadius: 10),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Max possible
+            Text(
+              'MAX POSSIBLE',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 10,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${dynamicMaxRpm - 1}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '(6000 + $totalDays days)',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.4),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'OK',
+              style: TextStyle(color: Colors.cyan),
+            ),
+          ),
         ],
       ),
     );
@@ -1612,219 +1734,36 @@ class _SpinnerRingPainter extends CustomPainter {
   }
 }
 
-/// Lightning/cyber effect radiating from spinner center
-class _CyberLightningOverlay extends StatelessWidget {
+/// Simple cyan glow overlay for fidget spinner
+class _CyberGlowOverlay extends StatelessWidget {
   final double intensity; // 0.0 ~ 1.0
-  final double animation;
-  final Offset center; // Center of the spinner in screen coordinates
-  final double ringRadius; // Radius of the spinner ring
 
-  const _CyberLightningOverlay({
+  const _CyberGlowOverlay({
     required this.intensity,
-    required this.animation,
-    required this.center,
-    required this.ringRadius,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (intensity < 0.3) return const SizedBox.shrink();
-
     final effectIntensity = ((intensity - 0.3) / 0.7).clamp(0.0, 1.0);
 
     return IgnorePointer(
-      child: CustomPaint(
-        size: Size.infinite,
-        painter: _LightningPainter(
-          intensity: effectIntensity,
-          animation: animation,
-          center: center,
-          ringRadius: ringRadius,
+      child: Center(
+        child: Container(
+          width: 300,
+          height: 300,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.cyan.withValues(alpha: effectIntensity * 0.3),
+                blurRadius: 80 + effectIntensity * 60,
+                spreadRadius: 20 + effectIntensity * 30,
+              ),
+            ],
+          ),
         ),
       ),
     );
-  }
-}
-
-/// Painter for energy effects radiating outward from center
-/// Uses energy ripples + few thick arcs for quality feel
-class _LightningPainter extends CustomPainter {
-  final double intensity;
-  final double animation;
-  final Offset center;
-  final double ringRadius;
-
-  // Amber gold color for high intensity
-  static const amberGold = Color(0xFFFFB300);
-
-  _LightningPainter({
-    required this.intensity,
-    required this.animation,
-    required this.center,
-    required this.ringRadius,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Protect inner circle - clip out the center
-    canvas.save();
-    final innerRadius = ringRadius * 0.85;
-    canvas.clipPath(
-      Path()
-        ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-        ..addOval(Rect.fromCircle(center: center, radius: innerRadius))
-        ..fillType = PathFillType.evenOdd,
-    );
-
-    // Color interpolation: cyan → amber gold based on intensity
-    final effectColor = Color.lerp(Colors.cyan, amberGold, intensity)!;
-
-    // 1. Energy ripples expanding outward
-    _drawEnergyRipples(canvas, effectColor);
-
-    // 2. Few thick electric arcs (2-4 max)
-    if (intensity > 0.3) {
-      _drawThickArcs(canvas, size, effectColor);
-    }
-
-    // 3. Subtle outer glow
-    _drawOuterGlow(canvas, effectColor);
-
-    canvas.restore();
-  }
-
-  void _drawEnergyRipples(Canvas canvas, Color effectColor) {
-    // 3-5 expanding ripples based on animation
-    final rippleCount = 3 + (intensity * 2).toInt();
-
-    for (int i = 0; i < rippleCount; i++) {
-      // Each ripple at different phase
-      final phase = (animation * 2 + i / rippleCount) % 1.0;
-
-      // Ripple expands from ring edge outward
-      final rippleRadius = ringRadius + (ringRadius * 3.0 * intensity * phase);
-
-      // Fade out as it expands
-      final rippleAlpha = (1.0 - phase) * intensity * 0.6;
-
-      if (rippleAlpha > 0.05) {
-        final ripplePaint = Paint()
-          ..color = effectColor.withValues(alpha: rippleAlpha)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0 + (1.0 - phase) * 3.0; // Thicker when closer
-
-        canvas.drawCircle(center, rippleRadius, ripplePaint);
-      }
-    }
-  }
-
-  void _drawThickArcs(Canvas canvas, Size size, Color effectColor) {
-    final random = math.Random((animation * 50).toInt());
-
-    // Only 2-4 arcs for quality feel
-    final arcCount = 2 + (intensity * 2).toInt().clamp(0, 2);
-
-    for (int i = 0; i < arcCount; i++) {
-      // Arc starting angle - spread evenly with some randomness
-      final baseAngle = (i / arcCount) * 2 * math.pi + animation * math.pi;
-      final startAngle = baseAngle + (random.nextDouble() - 0.5) * 0.5;
-
-      // Arc length increases with intensity
-      final arcLength = ringRadius * (1.5 + intensity * 3.0);
-
-      // Draw thick glowing arc
-      _drawSingleArc(
-        canvas,
-        size,
-        startAngle,
-        arcLength,
-        effectColor,
-        random,
-      );
-    }
-  }
-
-  void _drawSingleArc(
-    Canvas canvas,
-    Size size,
-    double startAngle,
-    double maxLength,
-    Color color,
-    math.Random random,
-  ) {
-    final path = Path();
-
-    // Start from ring edge
-    var current = Offset(
-      center.dx + ringRadius * math.cos(startAngle),
-      center.dy + ringRadius * math.sin(startAngle),
-    );
-    path.moveTo(current.dx, current.dy);
-
-    // 3-5 segments for smooth but jagged arc
-    final segments = 3 + random.nextInt(3);
-    final segmentLength = maxLength / segments;
-    var currentAngle = startAngle;
-
-    for (int i = 0; i < segments; i++) {
-      // Slight angle deviation for electric feel
-      currentAngle += (random.nextDouble() - 0.5) * 0.4;
-      final length = segmentLength * (0.8 + random.nextDouble() * 0.4);
-
-      current = Offset(
-        current.dx + length * math.cos(currentAngle),
-        current.dy + length * math.sin(currentAngle),
-      );
-
-      // Clamp to screen
-      current = Offset(
-        current.dx.clamp(0, size.width),
-        current.dy.clamp(0, size.height),
-      );
-
-      path.lineTo(current.dx, current.dy);
-    }
-
-    // Draw glow layer (wider, more transparent)
-    final glowPaint = Paint()
-      ..color = color.withValues(alpha: intensity * 0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 8.0 + intensity * 6.0
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-    canvas.drawPath(path, glowPaint);
-
-    // Draw core (thinner, brighter)
-    final corePaint = Paint()
-      ..color = Color.lerp(color, Colors.white, 0.5)!.withValues(alpha: 0.8 + intensity * 0.2)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 + intensity * 2.0
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPath(path, corePaint);
-  }
-
-  void _drawOuterGlow(Canvas canvas, Color effectColor) {
-    // Soft radial glow expanding from ring
-    final glowRadius = ringRadius * (1.5 + intensity * 2.5);
-
-    final glowPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          effectColor.withValues(alpha: intensity * 0.15),
-          effectColor.withValues(alpha: intensity * 0.05),
-          Colors.transparent,
-        ],
-        stops: const [0.3, 0.7, 1.0],
-      ).createShader(Rect.fromCircle(center: center, radius: glowRadius));
-
-    canvas.drawCircle(center, glowRadius, glowPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _LightningPainter oldDelegate) {
-    return oldDelegate.intensity != intensity ||
-        oldDelegate.animation != animation ||
-        oldDelegate.center != center;
   }
 }
 
