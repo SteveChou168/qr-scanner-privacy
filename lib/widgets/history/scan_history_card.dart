@@ -2,6 +2,7 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../app_text.dart';
 import '../../data/models/scan_record.dart';
 import '../../utils/date_format_helper.dart';
 import '../../utils/semantic_type_extension.dart';
@@ -254,27 +255,32 @@ class ScanHistoryCard extends StatelessWidget {
   }
 
   Widget _buildTypeBadge(ColorScheme colorScheme) {
-    final (label, color) = _getTypeInfo();
+    final typeLabel = record.semanticType == SemanticType.isbn
+        ? AppText.typeIsbn
+        : record.semanticType.label;
+    final color = record.semanticType.color;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: color,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 類型標籤 (ISBN)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            typeLabel,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
         ),
-      ),
+      ],
     );
-  }
-
-  (String, Color) _getTypeInfo() {
-    return (record.semanticType.typeLabel, record.semanticType.color);
   }
 
   Widget _buildActionButton(BuildContext context, ColorScheme colorScheme) {

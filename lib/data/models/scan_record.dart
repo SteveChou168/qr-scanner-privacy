@@ -96,7 +96,6 @@ class ScanRecord {
   final String? placeName;
   final String placeSource;
   final String? imagePath;
-  final String? codeLetter; // A/B/C/D for multi-code scans
   final List<String> tags;
   final String? note;
   final bool isFavorite;
@@ -111,22 +110,16 @@ class ScanRecord {
     this.placeName,
     this.placeSource = 'none',
     this.imagePath,
-    this.codeLetter,
     this.tags = const [],
     this.note,
     this.isFavorite = false,
   });
 
-  /// Primary label for display (semantic type + optional code letter)
+  /// Primary label for display (semantic type)
   String get primaryLabel {
-    final base = semanticType == SemanticType.isbn
+    return semanticType == SemanticType.isbn
         ? AppText.typeIsbn
         : semanticType.label;
-    // 多碼掃描時顯示字母標識，如 "URL (A)"
-    if (codeLetter != null && codeLetter!.isNotEmpty) {
-      return '$base ($codeLetter)';
-    }
-    return base;
   }
 
   /// Secondary label for display (barcode format)
@@ -150,7 +143,6 @@ class ScanRecord {
       placeName: map['place_name'] as String?,
       placeSource: map['place_source'] as String? ?? 'none',
       imagePath: map['image_path'] as String?,
-      codeLetter: map['code_letter'] as String?,
       tags: (map['tags'] as String?)?.split(',').where((s) => s.isNotEmpty).toList() ?? [],
       note: map['note'] as String?,
       isFavorite: (map['is_favorite'] as int?) == 1,
@@ -169,7 +161,6 @@ class ScanRecord {
       'place_name': placeName,
       'place_source': placeSource,
       'image_path': imagePath,
-      'code_letter': codeLetter,
       'tags': tags.join(','),
       'note': note,
       'is_favorite': isFavorite ? 1 : 0,
@@ -187,7 +178,6 @@ class ScanRecord {
     String? placeName,
     String? placeSource,
     String? imagePath,
-    String? codeLetter,
     List<String>? tags,
     String? note,
     bool? isFavorite,
@@ -202,7 +192,6 @@ class ScanRecord {
       placeName: placeName ?? this.placeName,
       placeSource: placeSource ?? this.placeSource,
       imagePath: imagePath ?? this.imagePath,
-      codeLetter: codeLetter ?? this.codeLetter,
       tags: tags ?? this.tags,
       note: note ?? this.note,
       isFavorite: isFavorite ?? this.isFavorite,

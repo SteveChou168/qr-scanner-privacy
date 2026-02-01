@@ -27,7 +27,6 @@ import '../services/location_service.dart';
 import '../services/taiwan_invoice_decoder.dart';
 import '../widgets/scan/scan_widgets.dart';
 import '../utils/url_launcher_helper.dart';
-import '../utils/image_annotator.dart';
 
 class ScanScreen extends StatefulWidget {
   final bool isActive;
@@ -900,14 +899,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// 標註並儲存截圖
-  /// - 在圖片上添加圓形字母標籤（A/B/C/D）標示每個碼的位置
+  /// 儲存截圖
   /// - 壓縮圖片：最大寬度 800px，JPEG 品質 75%
-  Future<String?> _saveScreenshot(
-    Uint8List? imageData, {
-    List<Rect?>? allBoundingBoxes,
-    Size? previewSize,
-  }) async {
+  Future<String?> _saveScreenshot(Uint8List? imageData) async {
     if (imageData == null) return null;
 
     try {
@@ -920,16 +914,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final filePath = p.join(screenshotsDir.path, fileName);
 
-      // 1. 添加圓形字母標籤（A/B/C/D）
-      final annotatedData = await ImageAnnotator.annotateImage(
-        imageData,
-        allBoundingBoxes ?? [],
-        previewSize,
-      );
-
-      // 2. 壓縮圖片：限制寬度 800px，JPEG 品質 75%
+      // 壓縮圖片：限制寬度 800px，JPEG 品質 75%
       final compressedData = await FlutterImageCompress.compressWithList(
-        annotatedData,
+        imageData,
         minWidth: 800,
         minHeight: 600,
         quality: 75,
@@ -951,8 +938,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     String? sharedPlaceName,
     String? sharedPlaceSource,
     String? sharedImagePath,
-    String? codeLetter,
-    List<Rect?>? allBoundingBoxes,
   }) async {
     final settings = context.read<SettingsProvider>();
     final historyProvider = context.read<HistoryProvider>();
@@ -971,14 +956,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
 
     // Save screenshot if enabled and not provided
-    // 多碼時：標註所有碼的位置（A/B/C/D）
-    // 單碼時：不標註字母
     if (imagePath == null && settings.saveImage) {
-      imagePath = await _saveScreenshot(
-        code.imageData,
-        allBoundingBoxes: allBoundingBoxes ?? [code.boundingBox],
-        previewSize: _previewSize,
-      );
+      imagePath = await _saveScreenshot(code.imageData);
     }
 
     final record = ScanRecord(
@@ -990,7 +969,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       placeName: placeName,
       placeSource: placeSource,
       imagePath: imagePath,
-      codeLetter: codeLetter,
     );
 
     await historyProvider.addRecord(record);
@@ -1044,30 +1022,20 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       }
     }
 
-    // Collect all bounding boxes for annotation
-    final allBoundingBoxes = _detectedCodes.map((c) => c.boundingBox).toList();
-    final isMultiCode = _detectedCodes.length > 1;
-
     // Get shared image data (use first code's image)
     final codeWithImage = _detectedCodes.firstWhere(
       (c) => c.imageData != null,
       orElse: () => _detectedCodes.first,
     );
 
-    // 多碼時：只保存一張圖，標註所有碼的位置（A/B/C/D）
-    // 所有記錄共享這張圖，用 codeLetter 區分
+    // 多碼時：所有記錄共享同一張圖
     String? sharedImagePath;
     if (settings.saveImage && codeWithImage.imageData != null) {
-      sharedImagePath = await _saveScreenshot(
-        codeWithImage.imageData,
-        allBoundingBoxes: isMultiCode ? allBoundingBoxes : null,
-        previewSize: _previewSize,
-      );
+      sharedImagePath = await _saveScreenshot(codeWithImage.imageData);
     }
 
     // Save each code with shared image
-    for (int i = 0; i < _detectedCodes.length; i++) {
-      final code = _detectedCodes[i];
+    for (final code in _detectedCodes) {
       final isDuplicate = await historyProvider.isDuplicateOfRecent(
         code.parsed.rawValue,
         limit: 10,
@@ -1077,16 +1045,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         continue;
       }
 
-      // Assign letter only for multi-code scans
-      final codeLetter = isMultiCode ? ImageAnnotator.getLetter(i) : null;
-
-      // All codes share the same annotated image
       await _buildAndSaveRecord(
         code,
         sharedPlaceName: placeName,
         sharedPlaceSource: placeSource,
         sharedImagePath: sharedImagePath,
-        codeLetter: codeLetter,
       );
     }
 
