@@ -1132,16 +1132,13 @@ class _CyberWorkshopViewState extends State<CyberWorkshopView>
 
                           // Lightning arcs (when spinning fast)
                           if (_currentRpm > 500)
-                            SizedBox(
-                              width: outerSize,
-                              height: outerSize,
+                            Positioned.fill(
                               child: CustomPaint(
                                 painter: _LightningPainter(
                                   arcCount: _currentRpm < 3000
                                       ? (_currentRpm / 750).floor().clamp(0, 4)
                                       : 5 + ((_currentRpm - 3000) / 750).floor().clamp(0, 3),
                                   intensity: spinnerSpeed,
-                                  center: Offset(outerSize / 2, outerSize / 2),
                                   ringRadius: ringSize / 2,
                                   innerRadius: innerSize / 2,
                                   seed: DateTime.now().millisecondsSinceEpoch,
@@ -1706,7 +1703,6 @@ class _SpinnerRingPainter extends CustomPainter {
 class _LightningPainter extends CustomPainter {
   final int arcCount;
   final double intensity;
-  final Offset center;
   final double ringRadius;
   final double innerRadius;
   final int seed;
@@ -1714,7 +1710,6 @@ class _LightningPainter extends CustomPainter {
   _LightningPainter({
     required this.arcCount,
     required this.intensity,
-    required this.center,
     required this.ringRadius,
     required this.innerRadius,
     required this.seed,
@@ -1724,6 +1719,8 @@ class _LightningPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (arcCount <= 0) return;
 
+    // Calculate center from actual canvas size
+    final center = Offset(size.width / 2, size.height / 2);
     final random = math.Random(seed);
 
     // Protect inner circle - clip out the center
@@ -1739,13 +1736,13 @@ class _LightningPainter extends CustomPainter {
     for (int i = 0; i < arcCount; i++) {
       final startAngle = (i / arcCount) * 2 * math.pi + random.nextDouble() * 0.5;
       final arcLength = ringRadius * (0.8 + intensity * 1.5);
-      _drawArc(canvas, size, startAngle, arcLength, random);
+      _drawArc(canvas, size, center, startAngle, arcLength, random);
     }
 
     canvas.restore();
   }
 
-  void _drawArc(Canvas canvas, Size size, double startAngle, double maxLength, math.Random random) {
+  void _drawArc(Canvas canvas, Size size, Offset center, double startAngle, double maxLength, math.Random random) {
     final path = Path();
 
     // Start from ring edge
