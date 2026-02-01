@@ -752,9 +752,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       for (final code in result.codes) {
         if (code.text == null || code.text!.isEmpty) continue;
 
-        // 跳過 ML Kit 已掃到的（避免重複）
-        if (_multiCodeBuffer.containsKey(code.text)) continue;
-
         final rawBytes = code.rawBytes;
 
         // 檢查是否為台灣電子發票，用 Big5 解碼
@@ -763,6 +760,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
           rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
           debugPrint('AR ZXing: 台灣發票 Big5 解碼');
         }
+
+        // 跳過已掃到的（用解碼後的 rawValue 檢查）
+        if (_multiCodeBuffer.containsKey(rawValue)) continue;
 
         final parsed = _parser.parse(
           rawValue: rawValue,
