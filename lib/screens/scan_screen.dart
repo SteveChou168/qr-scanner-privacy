@@ -15,6 +15,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 
+import 'package:flutter_zxing/flutter_zxing.dart' as zxing;
+
 import '../app_text.dart';
 import '../data/models/scan_record.dart';
 import '../growth/logic/growth_service.dart';
@@ -22,6 +24,7 @@ import '../providers/history_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/barcode_parser.dart';
 import '../services/location_service.dart';
+import '../services/taiwan_invoice_decoder.dart';
 import '../widgets/scan/scan_widgets.dart';
 import '../utils/url_launcher_helper.dart';
 import '../utils/image_annotator.dart';
@@ -95,6 +98,15 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   // 對焦功能
   bool _focusSupported = true; // 假設支持，失敗時設為 false
 
+  // 解析度模式：0=FHD(1920x1080), 1=2K(2560x1440), 2=4K(3840x2160)
+  int _resolutionMode = 0;
+  static const List<Size> _resolutions = [
+    Size(1920, 1080),  // FHD
+    Size(2560, 1440),  // 2K
+    Size(3840, 2160),  // 4K
+  ];
+  static const List<String> _resolutionLabels = ['FHD', '2K', '4K'];
+
   @override
   void initState() {
     super.initState();
@@ -117,13 +129,43 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _controllerReturnImage = returnImage;
     _controller = ms.MobileScannerController(
       detectionSpeed: ms.DetectionSpeed.noDuplicates,
-      cameraResolution: const Size(1920, 1080),
+      cameraResolution: _resolutions[_resolutionMode],
       returnImage: returnImage,
     );
     // Manually start if tab is active (autoStart removed in v7.x)
     if (widget.isActive) {
       _controller?.start();
     }
+  }
+
+  /// 切換解析度模式 (FHD → 2K → 4K → FHD)
+  Future<void> _cycleResolution() async {
+    if (!mounted) return;
+
+    final nextMode = (_resolutionMode + 1) % _resolutions.length;
+
+    // 先停止並釋放舊的 controller
+    final oldController = _controller;
+    _controller = null;
+
+    // 先更新 UI，讓 MobileScanner 知道 controller 變了
+    setState(() {
+      _resolutionMode = nextMode;
+    });
+
+    await oldController?.stop();
+    await oldController?.dispose();
+
+    // 等待一下確保資源完全釋放
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    if (!mounted) return;
+
+    // 重建 controller
+    _initController(returnImage: _controllerReturnImage);
+
+    // 觸發重建
+    setState(() {});
   }
 
   Future<void> _initAudio() async {
@@ -387,14 +429,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       _detectedCodes = stableCodes;
     });
 
-    // Auto-open URL: 單個 URL 且開啟自動開啟設定
-    if (stableCodes.length == 1 &&
-        stableCodes.first.parsed.semanticType == SemanticType.url &&
-        settings.autoOpenUrl) {
-      _handleAutoOpenUrl(stableCodes.first);
-      return;
-    }
-
     // 直接顯示結果
     if (stableCodes.length == 1) {
       _showSingleResult(stableCodes.first);
@@ -639,19 +673,127 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _controller?.stop();
   }
 
-  /// AR Mode: 時間到後固定背景（抓最後一幀）
-  void _pauseArModeWithBackground() {
+  /// AR Mode: 時間到後固定背景（抓最後一幀）+ ZXing 補掃
+  Future<void> _pauseArModeWithBackground() async {
     // 避免競態條件：如果已暫停、不在 AR 模式、或 widget 已卸載，直接返回
     if (_isPaused || !_multiCodeMode || !mounted) return;
 
     // 取第一個穩定碼的圖片作為背景
     final stableCode = _multiCodeBuffer.values.firstOrNull;
-    _pauseWithBackground(stableCode?.imageData);
+    final imageData = stableCode?.imageData;
+    _pauseWithBackground(imageData);
+
+    // 用 ZXing 補掃背景圖片（MIG 4.0 發票 ML Kit 掃不出來）
+    if (imageData != null) {
+      final zxingCodes = await _scanWithZXing(imageData);
+
+      // 合併結果：ZXing 優先（Big5 解碼更準確）
+      for (final code in zxingCodes) {
+        _multiCodeBuffer[code.parsed.rawValue] = code;
+      }
+    }
+
+    if (!mounted) return;
 
     // 更新 detectedCodes 為 buffer 中的穩定碼
     setState(() {
       _detectedCodes = _multiCodeBuffer.values.toList();
     });
+  }
+
+  /// AR Mode: ZXing 掃描背景圖片
+  Future<List<DetectedCode>> _scanWithZXing(Uint8List imageBytes) async {
+    final codes = <DetectedCode>[];
+    File? tempFile;
+
+    try {
+      debugPrint('AR ZXing: 開始補掃...');
+
+      // 寫到臨時檔案（ZXing 需要路徑）
+      final tempDir = await getTemporaryDirectory();
+      tempFile = File(p.join(tempDir.path, 'ar_scan_${DateTime.now().millisecondsSinceEpoch}.jpg'));
+      await tempFile.writeAsBytes(imageBytes);
+
+      final params = zxing.DecodeParams(
+        imageFormat: zxing.ImageFormat.rgb,
+        format: zxing.Format.any,
+        tryHarder: true,
+        tryRotate: true,
+        tryInverted: true,
+        isMultiScan: true,
+        maxSize: 9999,
+      );
+
+      final result = await zxing.zx.readBarcodesImagePathString(tempFile.path, params);
+      debugPrint('AR ZXing: 找到 ${result.codes.length} 個');
+
+      for (final code in result.codes) {
+        if (code.text == null || code.text!.isEmpty) continue;
+
+        // 跳過 ML Kit 已掃到的（避免重複）
+        if (_multiCodeBuffer.containsKey(code.text)) continue;
+
+        final rawBytes = code.rawBytes;
+
+        // 檢查是否為台灣電子發票，用 Big5 解碼
+        String rawValue = code.text!;
+        if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
+          rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
+          debugPrint('AR ZXing: 台灣發票 Big5 解碼');
+        }
+
+        final parsed = _parser.parse(
+          rawValue: rawValue,
+          format: _zxingFormatToMsFormat(code.format),
+        );
+
+        Rect? boundingBox;
+        if (code.position != null) {
+          final pos = code.position!;
+          boundingBox = Rect.fromLTRB(
+            pos.topLeftX.toDouble(),
+            pos.topLeftY.toDouble(),
+            pos.bottomRightX.toDouble(),
+            pos.bottomRightY.toDouble(),
+          );
+        }
+
+        codes.add(DetectedCode(
+          parsed: parsed,
+          boundingBox: boundingBox,
+          imageData: imageBytes,
+          rawBytes: rawBytes,
+        ));
+      }
+    } catch (e) {
+      debugPrint('AR ZXing error: $e');
+    } finally {
+      // 確保臨時檔案被清除
+      tempFile?.delete().ignore();
+    }
+
+    return codes;
+  }
+
+  /// Convert ZXing Format (int) to mobile_scanner format
+  ms.BarcodeFormat _zxingFormatToMsFormat(int? format) {
+    if (format == null) return ms.BarcodeFormat.unknown;
+    return switch (format) {
+      zxing.Format.qrCode => ms.BarcodeFormat.qrCode,
+      zxing.Format.dataMatrix => ms.BarcodeFormat.dataMatrix,
+      zxing.Format.pdf417 => ms.BarcodeFormat.pdf417,
+      zxing.Format.aztec => ms.BarcodeFormat.aztec,
+      zxing.Format.ean13 => ms.BarcodeFormat.ean13,
+      zxing.Format.ean8 => ms.BarcodeFormat.ean8,
+      zxing.Format.upca => ms.BarcodeFormat.upcA,
+      zxing.Format.upce => ms.BarcodeFormat.upcE,
+      zxing.Format.code128 => ms.BarcodeFormat.code128,
+      zxing.Format.code39 => ms.BarcodeFormat.code39,
+      zxing.Format.itf => ms.BarcodeFormat.itf,
+      zxing.Format.codabar => ms.BarcodeFormat.codabar,
+      zxing.Format.code93 => ms.BarcodeFormat.code93,
+      _ => ms.BarcodeFormat.unknown,
+    };
   }
 
   Future<void> _handleAction(DetectedCode code, ScanAction action) async {
@@ -724,15 +866,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 自動開啟 URL 模式：儲存記錄後直接開啟網頁
-  Future<void> _handleAutoOpenUrl(DetectedCode code) async {
-    // 儲存記錄（不顯示 Snackbar）
-    await _saveCodeIfNotDuplicate(code);
-
-    // 開啟 URL，並等待返回後才恢復掃描
-    await _openUrlAndWaitReturn(code.parsed.rawValue);
-  }
-
   /// 開啟 URL，根據用戶設定決定使用內建或外部瀏覽器
   /// - 內建：Chrome Custom Tabs (Android) / Safari View Controller (iOS)
   /// - 外部：系統預設瀏覽器（Edge、Firefox 等）
@@ -742,18 +875,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       url,
       useExternalBrowser: settings.useExternalBrowser,
     );
-  }
-
-  /// 開啟 URL（自動開啟模式專用）
-  /// Chrome Custom Tabs / 外部瀏覽器都不會阻塞，由 app lifecycle 處理恢復掃描
-  Future<void> _openUrlAndWaitReturn(String url) async {
-    final settings = context.read<SettingsProvider>();
-    await UrlLauncherHelper.openUrl(
-      url,
-      useExternalBrowser: settings.useExternalBrowser,
-    );
-    // Chrome Custom Tabs 和外部瀏覽器都不會阻塞
-    // 由 didChangeAppLifecycleState 在 app resumed 時自動恢復掃描
   }
 
   /// 標註並儲存截圖
@@ -1126,14 +1247,20 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                   onHorizontalDragUpdate: _pointerCount >= 2 ? (_) {} : null,
                   child: RepaintBoundary(
                     key: _cameraKey,
-                    child: ms.MobileScanner(
-                      controller: _controller!,
-                      fit: BoxFit.cover,
-                      onDetect: _onDetect,
-                      errorBuilder: (context, error) {
-                        return _buildCameraError(error);
-                      },
-                    ),
+                    child: _controller == null
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          )
+                        : ms.MobileScanner(
+                            controller: _controller!,
+                            fit: BoxFit.cover,
+                            onDetect: _onDetect,
+                            errorBuilder: (context, error) {
+                              return _buildCameraError(error);
+                            },
+                          ),
                   ),
                 );
               },
@@ -1173,6 +1300,50 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                 onCodeTap: _selectArCode,
               ),
             ),
+
+          // 解析度切換按鈕（左下角，toolbar 上方）
+          Positioned(
+            bottom: 100 + MediaQuery.of(context).padding.bottom,
+            left: 16,
+            child: GestureDetector(
+              onTap: _cycleResolution,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _resolutionMode > 0
+                      ? Colors.amber.withAlpha(230)
+                      : Colors.black.withAlpha(180),
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(60),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.high_quality,
+                      color: _resolutionMode > 0 ? Colors.black : Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _resolutionLabels[_resolutionMode],
+                      style: TextStyle(
+                        color: _resolutionMode > 0 ? Colors.black : Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
 
           // Multi-code mode indicator
           if (_multiCodeMode)
