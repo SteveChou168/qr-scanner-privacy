@@ -63,11 +63,13 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   // Multi-frame accumulation for better detection
   final Map<String, AccumulatedCode> _frameAccumulator = {};
   final Map<String, ParsedBarcode> _parseCache = {}; // Parse Cache 避免重複解析
-  Timer? _accumulationTimer;
+  Timer? _accumulationTimer;  // AR 模式用
+  Timer? _detectionTimer;     // 標準模式：偵測到碼後 200ms
+  Timer? _fallbackTimer;      // 標準模式：1 秒 fallback
   static const int _defaultFrameCount = 1; // 預設閾值（降低以提高識別率）
   static const int _maxFrameCount = 10; // frameCount 上限，避免無限增長
-  static const Duration _accumulationWindow = Duration(milliseconds: 1000); // 累積 1 秒後停止
-  static const Duration _extendedAccumulationWindow = Duration(milliseconds: 2000); // 重掃時使用 2 秒
+  static const Duration _accumulationWindow = Duration(milliseconds: 600); // AR 模式累積時間
+  static const Duration _extendedAccumulationWindow = Duration(milliseconds: 2000); // AR 重掃時使用 2 秒
 
   // Continuous scan mode
   int _continuousScanCount = 0;
@@ -76,6 +78,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   // Paused background image (to show last frame when scanner is stopped)
   Uint8List? _pausedBackgroundImage;
+
+  // 最新的相機幀（用於 fallback 掃描）
+  Uint8List? _latestCameraFrame;
 
   // AR mode: currently selected code for inline result display
   DetectedCode? _arSelectedCode;
@@ -97,15 +102,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   // 對焦功能
   bool _focusSupported = true; // 假設支持，失敗時設為 false
-
-  // 解析度模式：0=FHD(1920x1080), 1=2K(2560x1440), 2=4K(3840x2160)
-  int _resolutionMode = 0;
-  static const List<Size> _resolutions = [
-    Size(1920, 1080),  // FHD
-    Size(2560, 1440),  // 2K
-    Size(3840, 2160),  // 4K
-  ];
-  static const List<String> _resolutionLabels = ['FHD', '2K', '4K'];
 
   @override
   void initState() {
@@ -129,43 +125,13 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _controllerReturnImage = returnImage;
     _controller = ms.MobileScannerController(
       detectionSpeed: ms.DetectionSpeed.noDuplicates,
-      cameraResolution: _resolutions[_resolutionMode],
+      cameraResolution: const Size(1920, 1080),
       returnImage: returnImage,
     );
     // Manually start if tab is active (autoStart removed in v7.x)
     if (widget.isActive) {
       _controller?.start();
     }
-  }
-
-  /// 切換解析度模式 (FHD → 2K → 4K → FHD)
-  Future<void> _cycleResolution() async {
-    if (!mounted) return;
-
-    final nextMode = (_resolutionMode + 1) % _resolutions.length;
-
-    // 先停止並釋放舊的 controller
-    final oldController = _controller;
-    _controller = null;
-
-    // 先更新 UI，讓 MobileScanner 知道 controller 變了
-    setState(() {
-      _resolutionMode = nextMode;
-    });
-
-    await oldController?.stop();
-    await oldController?.dispose();
-
-    // 等待一下確保資源完全釋放
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    if (!mounted) return;
-
-    // 重建 controller
-    _initController(returnImage: _controllerReturnImage);
-
-    // 觸發重建
-    setState(() {});
   }
 
   Future<void> _initAudio() async {
@@ -237,6 +203,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       _detectedCodes = [];
       _frameAccumulator.clear();
       _accumulationTimer?.cancel();
+      _detectionTimer?.cancel();
+      _fallbackTimer?.cancel();
       _multiCodeBuffer.clear();
     });
   }
@@ -247,6 +215,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _debounceTimer?.cancel();
     _recentlyClearTimer?.cancel();
     _accumulationTimer?.cancel();
+    _detectionTimer?.cancel();
+    _fallbackTimer?.cancel();
     _controller?.dispose();
     _audioPlayer.dispose();
     super.dispose();
@@ -256,11 +226,25 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     if (_isPaused || _isProcessing) return;
 
     try {
-      final barcodes = capture.barcodes;
-      if (barcodes.isEmpty) return;
+      // 保存最新的相機幀（用於 fallback 掃描）
+      if (capture.image != null) {
+        _latestCameraFrame = capture.image;
+      }
 
       // Get preview size for AR overlay
       _previewSize = capture.size;
+
+      final barcodes = capture.barcodes;
+      if (barcodes.isEmpty) {
+        // 沒有偵測到碼，但仍啟動 fallback Timer（標準模式）
+        if (!_multiCodeMode) {
+          _fallbackTimer ??= Timer(const Duration(seconds: 1), () {
+            _fallbackTimer = null;
+            _stopAndShowResults();
+          });
+        }
+        return;
+      }
 
       // 累積多幀偵測結果
       _accumulateDetectedCodes(barcodes, capture.image);
@@ -341,11 +325,23 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       return;
     }
 
-    // Single Mode: 1 秒後停止掃描，顯示結果讓用戶選擇
-    _accumulationTimer ??= Timer(_accumulationWindow, () {
-      _accumulationTimer = null;
+    // Single Mode: 兩層 Timer 設計
+    // 1. fallback Timer（1 秒）：開始掃描時啟動，ML Kit 掃不到時 fallback
+    // 2. detection Timer（200ms）：偵測到碼時啟動，等相機穩定
+    _fallbackTimer ??= Timer(const Duration(seconds: 1), () {
+      _fallbackTimer = null;
       _stopAndShowResults();
     });
+
+    // 偵測到碼 → 取消 fallback，啟動 200ms Timer
+    if (_detectionTimer == null && _frameAccumulator.isNotEmpty) {
+      _fallbackTimer?.cancel();
+      _fallbackTimer = null;
+      _detectionTimer = Timer(const Duration(milliseconds: 200), () {
+        _detectionTimer = null;
+        _stopAndShowResults();
+      });
+    }
   }
 
   void _updateDetectedCodesFromAccumulator() {
@@ -354,29 +350,29 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         .map((acc) => acc.code.copyWith(frameCount: acc.frameCount))
         .toList();
 
-    // 方案 B: 只在碼列表實際變化時 setState
-    final oldKeys = _detectedCodes.map((c) => c.parsed.rawValue).toSet();
-    final newKeys = newCodes.map((c) => c.parsed.rawValue).toSet();
     final hasNewStableCode = newCodes.any((c) =>
         c.frameCount == _defaultFrameCount &&
         !_detectedCodes.any((old) =>
             old.parsed.rawValue == c.parsed.rawValue &&
             old.frameCount >= _defaultFrameCount));
 
-    // 只在以下情況 setState：
-    // 1. 碼列表 key 變化（新增或移除）
-    // 2. 有碼剛達到穩定閾值
-    if (!_setEquals(oldKeys, newKeys) || hasNewStableCode) {
-      // 掃到穩定碼時給震動（聲音留給結果顯示）
-      if (hasNewStableCode) {
-        final settings = context.read<SettingsProvider>();
-        if (settings.vibration) {
-          HapticFeedback.mediumImpact();
-        }
+    // 掃到穩定碼時給震動（聲音留給結果顯示）
+    if (hasNewStableCode) {
+      final settings = context.read<SettingsProvider>();
+      if (settings.vibration) {
+        HapticFeedback.mediumImpact();
       }
-      setState(() {
-        _detectedCodes = newCodes;
-      });
+    }
+
+    // AR 模式才需要即時更新 overlay，標準模式不需要
+    if (_multiCodeMode) {
+      final oldKeys = _detectedCodes.map((c) => c.parsed.rawValue).toSet();
+      final newKeys = newCodes.map((c) => c.parsed.rawValue).toSet();
+      if (!_setEquals(oldKeys, newKeys) || hasNewStableCode) {
+        setState(() {
+          _detectedCodes = newCodes;
+        });
+      }
     }
   }
 
@@ -388,24 +384,46 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     return true;
   }
 
-  /// Single Mode: 累積後直接顯示結果
-  void _stopAndShowResults() {
+  /// Single Mode: 累積後 + ZXing 補掃，顯示結果
+  Future<void> _stopAndShowResults() async {
     // 避免競態條件：如果已暫停、正在處理、在 AR 模式、或 widget 已卸載，直接返回
     if (_isPaused || _isProcessing || _multiCodeMode || !mounted) return;
 
-    // 過濾出穩定偵測到的碼（至少 N 幀）
-    final stableCodes = _frameAccumulator.entries
+    // 取得 ML Kit 累積的穩定碼
+    final mlKitCodes = _frameAccumulator.entries
         .where((e) => e.value.frameCount >= _defaultFrameCount)
         .map((e) => e.value.code)
         .toList();
 
-    if (stableCodes.isEmpty) {
-      // 沒有穩定的碼，繼續掃描
+    // 取得背景圖片（用於 ZXing 補掃）
+    // 優先順序：ML Kit 結果的圖片 > 最新相機幀 > 暫停背景
+    final imageData = mlKitCodes.isNotEmpty
+        ? mlKitCodes.first.imageData
+        : (_latestCameraFrame ?? _pausedBackgroundImage);
+
+    // 暫停相機，保留背景影像
+    _pauseWithBackground(imageData);
+
+    // ZXing 補掃背景圖片（MIG 4.0 發票 + Big5 解碼）
+    final zxingCodes = imageData != null ? await _scanWithZXing(imageData) : <DetectedCode>[];
+
+    if (!mounted) return;
+
+    // 合併結果：用 rawValue 做 key，ZXing 優先
+    final merged = <String, DetectedCode>{};
+    for (final code in mlKitCodes) {
+      merged[code.parsed.rawValue] = code;
+    }
+    for (final code in zxingCodes) {
+      merged[code.parsed.rawValue] = code;  // ZXing 覆蓋 ML Kit
+    }
+    final allCodes = merged.values.toList();
+
+    // 沒有任何結果，繼續掃描
+    if (allCodes.isEmpty) {
       _frameAccumulator.clear();
       _parseCache.clear();
-      setState(() {
-        _detectedCodes = [];
-      });
+      _resumeScanning();
       return;
     }
 
@@ -413,25 +431,22 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
     // 連續掃描模式：自動儲存並繼續掃描（不顯示結果）
     if (settings.continuousScanMode) {
-      _handleContinuousScan(stableCodes);
+      _handleContinuousScan(allCodes);
       return;
     }
 
-    // 結果顯示時只給聲音（震動在掃到時已給）
+    // 結果顯示時只給聲音
     if (settings.sound) {
       _playBeep();
     }
 
-    // 停止掃描，保留背景影像
-    _pauseWithBackground(stableCodes.first.imageData);
-
     setState(() {
-      _detectedCodes = stableCodes;
+      _detectedCodes = allCodes;
     });
 
     // 直接顯示結果
-    if (stableCodes.length == 1) {
-      _showSingleResult(stableCodes.first);
+    if (allCodes.length == 1) {
+      _showSingleResult(allCodes.first);
     } else {
       _showMultiCodeSheet();
     }
@@ -446,7 +461,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _frameAccumulator.clear();
     _parseCache.clear();
     _accumulationTimer?.cancel();
-    _accumulationTimer = null; // 確保 Timer 完全清除
+    _accumulationTimer = null;
+    _detectionTimer?.cancel();
+    _detectionTimer = null;
+    _fallbackTimer?.cancel();
+    _fallbackTimer = null;
     _multiCodeBuffer.clear();
     _arSelectedCode = null;
     _arVerticalOffset = 0.0; // 重置垂直偏移
@@ -642,9 +661,13 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   void _resumeScanning() {
     if (mounted) {
-      // 先取消 Timer 避免競態條件
+      // 先取消所有 Timer 避免競態條件
       _accumulationTimer?.cancel();
       _accumulationTimer = null;
+      _detectionTimer?.cancel();
+      _detectionTimer = null;
+      _fallbackTimer?.cancel();
+      _fallbackTimer = null;
 
       setState(() {
         _isPaused = false;
@@ -1300,50 +1323,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                 onCodeTap: _selectArCode,
               ),
             ),
-
-          // 解析度切換按鈕（左下角，toolbar 上方）
-          Positioned(
-            bottom: 100 + MediaQuery.of(context).padding.bottom,
-            left: 16,
-            child: GestureDetector(
-              onTap: _cycleResolution,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _resolutionMode > 0
-                      ? Colors.amber.withAlpha(230)
-                      : Colors.black.withAlpha(180),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(60),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.high_quality,
-                      color: _resolutionMode > 0 ? Colors.black : Colors.white,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _resolutionLabels[_resolutionMode],
-                      style: TextStyle(
-                        color: _resolutionMode > 0 ? Colors.black : Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
 
           // Multi-code mode indicator
           if (_multiCodeMode)
