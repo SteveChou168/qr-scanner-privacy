@@ -27,6 +27,7 @@ import '../services/location_service.dart';
 import '../services/taiwan_invoice_decoder.dart';
 import '../widgets/scan/scan_widgets.dart';
 import '../utils/url_launcher_helper.dart';
+import '../services/inverted_barcode_helper.dart';
 
 class ScanScreen extends StatefulWidget {
   final bool isActive;
@@ -101,6 +102,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   // 對焦功能
   bool _focusSupported = true; // 假設支持，失敗時設為 false
+
+  // 反相模式（用於掃描白底黑字條碼）
+  bool _invertMode = false;
 
   @override
   void initState() {
@@ -232,6 +236,18 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
       // Get preview size for AR overlay
       _previewSize = capture.size;
+
+      // ZXing 並行掃描
+      if (capture.image != null) {
+        if (_invertMode) {
+          // 反相模式：只用 ZXing 掃反相圖，跳過 ML Kit
+          _processInvertedFrame(capture.image);
+          return;
+        } else {
+          // 標準模式：ZXing 掃原圖（與 ML Kit 並行）
+          _processOriginalFrame(capture.image);
+        }
+      }
 
       final barcodes = capture.barcodes;
       if (barcodes.isEmpty) {
@@ -1069,6 +1085,144 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// 切換反相模式（用於掃描深色背景上的淺色條碼）
+  /// 不重建 controller，只用 ZXing 掃反相圖
+  void _toggleInvertMode() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _invertMode = !_invertMode;
+      // 重置掃描狀態
+      _frameAccumulator.clear();
+      _parseCache.clear();
+      _detectionTimer?.cancel();
+      _detectionTimer = null;
+      _fallbackTimer?.cancel();
+      _fallbackTimer = null;
+    });
+    debugPrint('Invert mode: $_invertMode (ZXing only)');
+  }
+
+  /// 標準模式：ZXing 掃原圖（與 ML Kit 並行）
+  Timer? _originalScanTimer;
+  bool _originalScanning = false;
+
+  void _processOriginalFrame(Uint8List? imageBytes) {
+    if (imageBytes == null || _isPaused || _originalScanning) return;
+
+    // Debounce：每 300ms 最多處理一次
+    if (_originalScanTimer?.isActive ?? false) return;
+    _originalScanTimer = Timer(const Duration(milliseconds: 300), () {});
+
+    _originalScanning = true;
+    _scanOriginalImage(imageBytes).then((_) {
+      _originalScanning = false;
+    });
+  }
+
+  Future<void> _scanOriginalImage(Uint8List imageBytes) async {
+    try {
+      // 直接用 ZXing 掃描原圖
+      final codes = await _scanWithZXing(imageBytes);
+
+      if (!mounted || codes.isEmpty || _isPaused) return;
+
+      final settings = context.read<SettingsProvider>();
+
+      // 播放聲音和震動
+      if (settings.sound) {
+        _playBeep();
+      }
+      if (settings.vibration) {
+        HapticFeedback.mediumImpact();
+      }
+
+      // 暫停相機，保留背景
+      _pauseWithBackground(imageBytes);
+
+      // 連續掃描模式
+      if (settings.continuousScanMode) {
+        _handleContinuousScan(codes);
+        return;
+      }
+
+      setState(() {
+        _detectedCodes = codes;
+      });
+
+      // 顯示結果
+      if (codes.length == 1) {
+        _showSingleResult(codes.first);
+      } else {
+        _showMultiCodeSheet();
+      }
+    } catch (e) {
+      debugPrint('Original scan error: $e');
+    }
+  }
+
+  /// 反相模式：反轉圖片顏色後用 ZXing 掃描
+  /// 用於掃描深色背景上的淺色條碼（如黑底白字）
+  Timer? _invertScanTimer;
+  bool _invertScanning = false;
+
+  void _processInvertedFrame(Uint8List? imageBytes) {
+    if (imageBytes == null || _isPaused || _invertScanning) return;
+
+    // Debounce：每 300ms 最多處理一次
+    if (_invertScanTimer?.isActive ?? false) return;
+    _invertScanTimer = Timer(const Duration(milliseconds: 300), () {});
+
+    _invertScanning = true;
+    _scanInvertedImage(imageBytes).then((_) {
+      _invertScanning = false;
+    });
+  }
+
+  Future<void> _scanInvertedImage(Uint8List imageBytes) async {
+    try {
+      // 反相圖片
+      final invertedBytes = InvertedBarcodeHelper.invertImage(imageBytes);
+      if (invertedBytes == null) return;
+
+      // 用 ZXing 掃描反相後的圖片
+      final codes = await _scanWithZXing(invertedBytes);
+
+      if (!mounted || codes.isEmpty) return;
+
+      final settings = context.read<SettingsProvider>();
+
+      // 播放聲音和震動
+      if (settings.sound) {
+        _playBeep();
+      }
+      if (settings.vibration) {
+        HapticFeedback.mediumImpact();
+      }
+
+      // 暫停相機，保留背景
+      _pauseWithBackground(imageBytes); // 用原圖當背景（不是反相圖）
+
+      // 連續掃描模式
+      if (settings.continuousScanMode) {
+        _handleContinuousScan(codes);
+        return;
+      }
+
+      setState(() {
+        _detectedCodes = codes;
+      });
+
+      // 顯示結果
+      if (codes.length == 1) {
+        _showSingleResult(codes.first);
+      } else {
+        _showMultiCodeSheet();
+      }
+    } catch (e) {
+      debugPrint('Invert scan error: $e');
+    }
+  }
+
   /// 重新觸發相機對焦（對焦到畫面中央）
   Future<void> _triggerFocus() async {
     await _setFocusPoint(const Offset(0.5, 0.5));
@@ -1160,8 +1314,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 退出照片模式
+  /// 退出照片模式，重新打開相簿讓用戶選另一張
   void _exitGalleryMode() {
+    // 確保相機停止（不要在背景跑）
+    _controller?.stop();
+
     setState(() {
       _galleryMode = false;
       _galleryImage = null;
@@ -1169,7 +1326,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       _galleryImagePath = null;
     });
     widget.onGalleryModeChanged?.call(false);
-    _resumeScanning();
+    // 重新打開相簿選擇器
+    _pickFromGallery();
   }
 
   @override
@@ -1371,8 +1529,10 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                 onGalleryTap: _pickFromGallery,
                 onTorchTap: _toggleTorch,
                 onArModeTap: _toggleMultiCodeMode,
+                onInvertModeTap: _toggleInvertMode,
                 isTorchOn: _torchOn,
                 isArModeActive: _multiCodeMode,
+                isInvertModeActive: _invertMode,
               ),
             ),
         ],

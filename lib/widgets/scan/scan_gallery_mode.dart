@@ -1,10 +1,14 @@
 // lib/widgets/scan/scan_gallery_mode.dart
 
-import 'dart:typed_data';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
 import 'package:flutter_zxing/flutter_zxing.dart' as zxing;
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart' as mlkit;
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../app_text.dart';
@@ -12,6 +16,7 @@ import '../../data/models/scan_record.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/barcode_parser.dart';
 import '../../services/taiwan_invoice_decoder.dart';
+import '../../services/photo_scanner_utils.dart';
 import 'scan_models.dart';
 import 'scan_action_buttons.dart';
 import 'scan_ar_overlay.dart';
@@ -54,7 +59,8 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
   void initState() {
     super.initState();
     _transformController.addListener(_onTransformChanged);
-    _scanImage();
+    // 先讓圖片渲染出來，再開始掃描
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scanImage());
   }
 
   @override
@@ -71,7 +77,7 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     }
   }
 
-  /// 並行掃描：ML Kit + ZXing 同時跑，合併結果
+  /// 並行掃描：ML Kit (切三塊) + ZXing 同時跑，合併結果
   Future<void> _scanImage() async {
     final path = widget.imagePath;
     final bytes = widget.imageBytes;
@@ -85,16 +91,15 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     try {
       debugPrint('📸 開始並行掃描: $path');
 
-      // 並行執行 ML Kit 和 ZXing
+      // 全並行：ML Kit + ZXing 同時跑
       final results = await Future.wait([
-        _scanWithMLKit(path, bytes),
+        _scanWithMLKitTripleCut(path, bytes),
         _scanWithZXing(path, bytes),
       ]);
 
       final mlKitCodes = results[0];
       final zxingCodes = results[1];
-
-      debugPrint('ML Kit: ${mlKitCodes.length} 個, ZXing: ${zxingCodes.length} 個');
+      debugPrint('ML Kit: ${mlKitCodes.length}, ZXing: ${zxingCodes.length}');
 
       // 合併結果：用 rawValue 做 key，ZXing 優先
       final merged = <String, DetectedCode>{};
@@ -137,39 +142,41 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     }
   }
 
-  /// ML Kit 掃描
-  Future<List<DetectedCode>> _scanWithMLKit(String path, Uint8List bytes) async {
+  /// ML Kit 掃描（使用切三塊策略 + EXIF 修正）
+  Future<List<DetectedCode>> _scanWithMLKitTripleCut(String path, Uint8List bytes) async {
     final codes = <DetectedCode>[];
     mlkit.BarcodeScanner? scanner;
 
     try {
-      debugPrint('ML Kit: 開始掃描...');
-      final inputImage = mlkit.InputImage.fromFilePath(path);
+      debugPrint('ML Kit (切三塊): 開始掃描...');
       scanner = mlkit.BarcodeScanner(formats: [mlkit.BarcodeFormat.all]);
-      final barcodes = await scanner.processImage(inputImage);
 
-      debugPrint('ML Kit: 找到 ${barcodes.length} 個');
+      // 使用 PhotoScannerUtils 的切三塊 + EXIF 修正
+      final photoBarcodes = await PhotoScannerUtils.scanAllWithTripleCut(path, scanner);
 
-      for (final barcode in barcodes) {
-        if (barcode.rawValue == null || barcode.rawValue!.isEmpty) continue;
+      debugPrint('ML Kit (切三塊): 找到 ${photoBarcodes.length} 個');
 
-        final rawBytes = barcode.rawBytes;
+      for (final photoBarcode in photoBarcodes) {
+        final rawValue = photoBarcode.barcode.rawValue;
+        if (rawValue == null || rawValue.isEmpty) continue;
+
+        final rawBytes = photoBarcode.barcode.rawBytes;
 
         // 檢查是否為台灣電子發票，用 Big5 解碼
-        String rawValue = barcode.rawValue!;
+        String decodedValue = rawValue;
         if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
-          rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
+          decodedValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
           debugPrint('ML Kit: 台灣發票 Big5 解碼');
         }
 
         final parsed = widget.parser.parse(
-          rawValue: rawValue,
-          format: _mlkitFormatToMsFormat(barcode.format),
+          rawValue: decodedValue,
+          format: _mlkitFormatToMsFormat(photoBarcode.barcode.format),
         );
 
         codes.add(DetectedCode(
           parsed: parsed,
-          boundingBox: barcode.boundingBox,
+          boundingBox: photoBarcode.originalBoundingBox,
           imageData: bytes,
           rawBytes: rawBytes,
         ));
@@ -183,13 +190,11 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     return codes;
   }
 
-  /// ZXing 掃描
+  /// ZXing 掃描（整面 + 反向，全並行）
   Future<List<DetectedCode>> _scanWithZXing(String path, Uint8List bytes) async {
-    final codes = <DetectedCode>[];
+    final codes = <String, DetectedCode>{}; // 用 rawValue 去重
 
     try {
-      debugPrint('ZXing: 開始掃描...');
-
       final params = zxing.DecodeParams(
         imageFormat: zxing.ImageFormat.rgb,
         format: zxing.Format.any,
@@ -200,49 +205,148 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
         maxSize: 9999,
       );
 
-      final result = await zxing.zx.readBarcodesImagePathString(path, params);
-      debugPrint('ZXing: 找到 ${result.codes.length} 個');
+      // 整面 + 反向並行
+      final results = await Future.wait([
+        _scanWithZXingFull(path, params),
+        _scanWithZXingInverted(bytes, params),
+      ]);
 
-      for (final code in result.codes) {
-        if (code.text == null || code.text!.isEmpty) continue;
-
-        final rawBytes = code.rawBytes;
-
-        // 檢查是否為台灣電子發票，用 Big5 解碼
-        String rawValue = code.text!;
-        if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
-          rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
-          debugPrint('ZXing: 台灣發票 Big5 解碼');
-        }
-
-        final parsed = widget.parser.parse(
-          rawValue: rawValue,
-          format: _zxingFormatToMsFormat(code.format),
-        );
-
-        Rect? boundingBox;
-        if (code.position != null) {
-          final pos = code.position!;
-          boundingBox = Rect.fromLTRB(
-            pos.topLeftX.toDouble(),
-            pos.topLeftY.toDouble(),
-            pos.bottomRightX.toDouble(),
-            pos.bottomRightY.toDouble(),
-          );
-        }
-
-        codes.add(DetectedCode(
-          parsed: parsed,
-          boundingBox: boundingBox,
-          imageData: bytes,
-          rawBytes: rawBytes,
-        ));
+      codes.addAll(results[0]);
+      for (final entry in results[1].entries) {
+        codes.putIfAbsent(entry.key, () => entry.value);
       }
     } catch (e) {
       debugPrint('ZXing error: $e');
     }
 
+    return codes.values.toList();
+  }
+
+  /// ZXing 整面掃描
+  Future<Map<String, DetectedCode>> _scanWithZXingFull(
+    String path,
+    zxing.DecodeParams params,
+  ) async {
+    final codes = <String, DetectedCode>{};
+
+    try {
+      final result = await zxing.zx.readBarcodesImagePathString(path, params);
+      for (final code in result.codes) {
+        _addZxingCode(code, codes, widget.imageBytes, offsetY: 0, scale: 1.0);
+      }
+    } catch (e) {
+      debugPrint('ZXing 整面 error: $e');
+    }
+
     return codes;
+  }
+
+  /// ZXing 手動反向掃描（先反轉圖片顏色再掃描）
+  /// 用於掃描深色背景上的淺色條碼（如黑底白字 QR Code）
+  Future<Map<String, DetectedCode>> _scanWithZXingInverted(
+    Uint8List bytes,
+    zxing.DecodeParams params,
+  ) async {
+    final codes = <String, DetectedCode>{};
+
+    try {
+      debugPrint('ZXing 反向: 開始掃描...');
+
+      // 在 isolate 中反轉圖片顏色（避免阻塞主線程）
+      final invertedBytes = await compute(_invertImageInIsolate, bytes);
+      if (invertedBytes == null) {
+        debugPrint('ZXing 反向: 圖片反轉失敗');
+        return codes;
+      }
+
+      // 寫入臨時檔案
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final tempPath = '${tempDir.path}/zxing_inverted_$timestamp.jpg';
+      await File(tempPath).writeAsBytes(invertedBytes);
+
+      try {
+        // ZXing 掃描反轉後的圖片
+        final result = await zxing.zx.readBarcodesImagePathString(tempPath, params);
+        debugPrint('ZXing 反向: 找到 ${result.codes.length} 個');
+
+        for (final code in result.codes) {
+          _addZxingCode(code, codes, bytes, offsetY: 0, scale: 1.0);
+        }
+      } finally {
+        // 清理臨時檔案
+        try {
+          await File(tempPath).delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('ZXing 反向 error: $e');
+    }
+
+    return codes;
+  }
+
+  /// 將 ZXing 掃描結果加入 codes map（含座標轉換）
+  void _addZxingCode(
+    zxing.Code code,
+    Map<String, DetectedCode> codes,
+    Uint8List bytes, {
+    required int offsetY,
+    required double scale,
+  }) {
+    if (code.text == null || code.text!.isEmpty) return;
+
+    final rawBytes = code.rawBytes;
+
+    // 檢查是否為台灣電子發票，用 Big5 解碼
+    String rawValue = code.text!;
+    if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
+      rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
+      debugPrint('ZXing: 台灣發票 Big5 解碼');
+    }
+
+    // 已存在則跳過
+    if (codes.containsKey(rawValue)) return;
+
+    final parsed = widget.parser.parse(
+      rawValue: rawValue,
+      format: _zxingFormatToMsFormat(code.format),
+    );
+
+    Rect? boundingBox;
+    if (code.position != null) {
+      final pos = code.position!;
+      // 座標轉換回原圖
+      boundingBox = Rect.fromLTRB(
+        pos.topLeftX.toDouble() / scale,
+        pos.topLeftY.toDouble() / scale + offsetY,
+        pos.bottomRightX.toDouble() / scale,
+        pos.bottomRightY.toDouble() / scale + offsetY,
+      );
+    }
+
+    codes[rawValue] = DetectedCode(
+      parsed: parsed,
+      boundingBox: boundingBox,
+      imageData: bytes,
+      rawBytes: rawBytes,
+    );
+  }
+
+  /// 在 isolate 中反轉圖片顏色（給 ZXing 反向掃描用）
+  static Uint8List? _invertImageInIsolate(Uint8List bytes) {
+    try {
+      final image = img.decodeImage(bytes);
+      if (image == null) return null;
+
+      // 反轉顏色
+      final inverted = img.invert(image);
+
+      // 編碼回 JPEG
+      return Uint8List.fromList(img.encodeJpg(inverted, quality: 85));
+    } catch (e) {
+      return null;
+    }
   }
 
   /// ML Kit BarcodeFormat -> mobile_scanner format
@@ -560,26 +664,13 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
           color: Colors.black.withAlpha(200),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              AppText.galleryScanning,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+        child: Text(
+          '⏳ ${AppText.galleryScanning}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+            fontSize: 14,
+          ),
         ),
       ),
     );
