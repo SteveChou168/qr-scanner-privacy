@@ -53,7 +53,7 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
 
   List<DetectedCode> _detectedCodes = [];
   DetectedCode? _selectedCode;
-  bool _isScanning = false;
+  bool _isScanning = true;  // 初始為 true，避免第一幀顯示「找不到」
 
   @override
   void initState() {
