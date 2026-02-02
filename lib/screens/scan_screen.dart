@@ -96,6 +96,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   // 照片模式
   bool _galleryMode = false;
+  bool _isPickingImage = false;  // 正在選擇照片（相簿選擇器開啟中）
   Uint8List? _galleryImage;
   Size? _galleryImageSize;
   String? _galleryImagePath;
@@ -1275,16 +1276,18 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     final controller = _controller;
     if (controller == null) return;
 
+    // 標記正在選擇照片，避免相機在背景啟動
+    setState(() => _isPickingImage = true);
+    controller.stop();
+
     try {
       final image = await _imagePicker.pickImage(source: ImageSource.gallery);
       if (image == null) {
-        // User cancelled - ensure scanner is running
+        // User cancelled - 回到相機模式
+        setState(() => _isPickingImage = false);
         controller.start();
         return;
       }
-
-      // 停止相機
-      controller.stop();
 
       // 讀取圖片
       final imageBytes = await File(image.path).readAsBytes();
@@ -1297,6 +1300,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
       // 進入照片模式
       setState(() {
+        _isPickingImage = false;
         _galleryMode = true;
         _galleryImage = imageBytes;
         _galleryImageSize = imageSize;
@@ -1320,6 +1324,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _controller?.stop();
 
     setState(() {
+      _isPickingImage = true;  // 標記正在選擇照片，避免相機啟動
       _galleryMode = false;
       _galleryImage = null;
       _galleryImageSize = null;
@@ -1332,6 +1337,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // 正在選擇照片，顯示黑屏（避免相機在背景跑）
+    if (_isPickingImage) {
+      return const Scaffold(backgroundColor: Colors.black);
+    }
+
     // 照片模式
     if (_galleryMode && _galleryImage != null && _galleryImageSize != null && _galleryImagePath != null) {
       return ScanGalleryMode(
