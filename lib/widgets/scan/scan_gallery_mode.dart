@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
 import 'package:flutter_zxing/flutter_zxing.dart' as zxing;
@@ -392,8 +393,8 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     await widget.onSaveCode(code);
     if (mounted) {
       final settings = context.read<SettingsProvider>();
-      if (settings.sound) {
-        widget.onPlayBeep();
+      if (settings.vibration) {
+        HapticFeedback.mediumImpact();
       }
       setState(() => _selectedCode = code);
     }
@@ -482,21 +483,11 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
         8,
         8,
       ),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.black.withAlpha(180), Colors.transparent],
-        ),
-      ),
       child: Row(
         children: [
-          IconButton(
+          IconButton.filledTonal(
             onPressed: widget.onExit,
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.white.withAlpha(30),
-            ),
+            icon: const Icon(Icons.arrow_back),
           ),
         ],
       ),
@@ -684,99 +675,94 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
       colorScheme.brightness == Brightness.dark ? Colors.black : Colors.white,
     );
 
-    return Container(
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(60),
-            blurRadius: 15,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle bar
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: colorScheme.outline.withAlpha(77),
-              borderRadius: BorderRadius.circular(2),
+    return GestureDetector(
+      onVerticalDragEnd: (details) {
+        // 下拉關閉（向下滑動速度 > 300 或位移 > 50）
+        if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+          _clearSelection();
+        }
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(60),
+              blurRadius: 15,
+              offset: const Offset(0, -4),
             ),
-          ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar (可下拉關閉)
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colorScheme.outline.withAlpha(77),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
 
-          Padding(
-            padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Type label with icon + thumbnail + close button
-                Row(
-                  children: [
-                    Text(
-                      code.parsed.semanticType.icon,
-                      style: const TextStyle(fontSize: 24),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            code.parsed.semanticType.label,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
-                          Text(
-                            code.parsed.barcodeFormat.displayName,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.outline,
-                            ),
-                          ),
-                        ],
+            Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Type label with icon + thumbnail
+                  Row(
+                    children: [
+                      Text(
+                        code.parsed.semanticType.icon,
+                        style: const TextStyle(fontSize: 24),
                       ),
-                    ),
-                    // Thumbnail
-                    if (settings.saveImage && code.imageData != null)
-                      Container(
-                        width: 48,
-                        height: 48,
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: colorScheme.outline.withAlpha(50),
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Image.memory(
-                          code.imageData!,
-                          fit: BoxFit.cover,
-                          cacheWidth: 100,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              code.parsed.semanticType.label,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
+                            Text(
+                              code.parsed.barcodeFormat.displayName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.outline,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    // Close button
-                    IconButton(
-                      onPressed: _clearSelection,
-                      icon: Icon(
-                        Icons.close,
-                        color: colorScheme.outline,
-                      ),
-                      style: IconButton.styleFrom(
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
-                    ),
-                  ],
-                ),
+                      // Thumbnail
+                      if (settings.saveImage && code.imageData != null)
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: colorScheme.outline.withAlpha(50),
+                            ),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.memory(
+                            code.imageData!,
+                            fit: BoxFit.cover,
+                            cacheWidth: 100,
+                          ),
+                        ),
+                    ],
+                  ),
                 const SizedBox(height: 12),
 
                 // Content
@@ -811,6 +797,7 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
             ),
           ),
         ],
+        ),
       ),
     );
   }
