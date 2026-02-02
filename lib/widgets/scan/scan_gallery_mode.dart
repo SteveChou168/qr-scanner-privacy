@@ -82,9 +82,6 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
     final path = widget.imagePath;
     final bytes = widget.imageBytes;
 
-    if (_isScanning) return;
-    setState(() => _isScanning = true);
-
     final startTime = DateTime.now();
     const minDisplayTime = Duration(milliseconds: 400);
 
