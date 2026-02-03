@@ -52,24 +52,17 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   bool _isPaused = false;
   bool _isProcessing = false;
   Timer? _debounceTimer;
-  Size? _previewSize;
   bool _controllerInitialized = false;
   bool _controllerReturnImage = false; // Track current returnImage setting
 
-  // Multi-code scan mode
-  bool _multiCodeMode = false;
-  final Map<String, DetectedCode> _multiCodeBuffer = {};
 
   // Multi-frame accumulation for better detection
   final Map<String, AccumulatedCode> _frameAccumulator = {};
   final Map<String, ParsedBarcode> _parseCache = {}; // Parse Cache 避免重複解析
-  Timer? _accumulationTimer;  // AR 模式用
   Timer? _detectionTimer;     // 標準模式：偵測到碼後 200ms
   Timer? _fallbackTimer;      // 標準模式：1 秒 fallback
   static const int _defaultFrameCount = 1; // 預設閾值（降低以提高識別率）
   static const int _maxFrameCount = 10; // frameCount 上限，避免無限增長
-  static const Duration _accumulationWindow = Duration(milliseconds: 600); // AR 模式累積時間
-  static const Duration _extendedAccumulationWindow = Duration(milliseconds: 2000); // AR 重掃時使用 2 秒
 
   // Continuous scan mode
   int _continuousScanCount = 0;
@@ -81,15 +74,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   // 最新的相機幀（用於 fallback 掃描）
   Uint8List? _latestCameraFrame;
-
-  // AR mode: currently selected code for inline result display
-  DetectedCode? _arSelectedCode;
-
-  // AR 模式：垂直平移偏移量（只允許向上，即負值）
-  double _arVerticalOffset = 0.0;
-
-  // AR 模式：是否使用延長的累積時間（重掃時為 true）
-  bool _useExtendedAccumulationTime = false;
 
   // 多點觸摸追蹤（用於阻止 PageView 滑動）
   int _pointerCount = 0;
@@ -206,10 +190,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     setState(() {
       _detectedCodes = [];
       _frameAccumulator.clear();
-      _accumulationTimer?.cancel();
       _detectionTimer?.cancel();
       _fallbackTimer?.cancel();
-      _multiCodeBuffer.clear();
     });
   }
 
@@ -218,7 +200,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _debounceTimer?.cancel();
     _recentlyClearTimer?.cancel();
-    _accumulationTimer?.cancel();
     _detectionTimer?.cancel();
     _fallbackTimer?.cancel();
     _controller?.dispose();
@@ -235,9 +216,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         _latestCameraFrame = capture.image;
       }
 
-      // Get preview size for AR overlay
-      _previewSize = capture.size;
-
       // ZXing 並行掃描
       if (capture.image != null) {
         if (_invertMode) {
@@ -252,13 +230,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
       final barcodes = capture.barcodes;
       if (barcodes.isEmpty) {
-        // 沒有偵測到碼，但仍啟動 fallback Timer（標準模式）
-        if (!_multiCodeMode) {
-          _fallbackTimer ??= Timer(const Duration(seconds: 1), () {
-            _fallbackTimer = null;
-            _stopAndShowResults();
-          });
-        }
+        // 沒有偵測到碼，啟動 fallback Timer
+        _fallbackTimer ??= Timer(const Duration(seconds: 1), () {
+          _fallbackTimer = null;
+          _stopAndShowResults();
+        });
         return;
       }
 
@@ -275,15 +251,21 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     for (final barcode in barcodes) {
       if (barcode.rawValue == null || barcode.rawValue!.isEmpty) continue;
 
-      final key = barcode.rawValue!;
+      final rawBytes = barcode.rawBytes;
 
-      // AR Mode 下已收集到 buffer 的碼，跳過處理
-      if (_multiCodeMode && _multiCodeBuffer.containsKey(key)) continue;
+      // 檢查是否為台灣電子發票，用 Big5 解碼
+      String decodedValue = barcode.rawValue!;
+      if (TaiwanInvoiceDecoder.isTaiwanInvoice(decodedValue, rawBytes)) {
+        decodedValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, decodedValue);
+        debugPrint('ML Kit: 台灣發票 Big5 解碼');
+      }
+
+      final key = decodedValue;
 
       // Parse Cache: 同一 rawValue 只解析一次
       final parsed = _parseCache.putIfAbsent(
         key,
-        () => _parser.parse(rawValue: barcode.rawValue!, format: barcode.format),
+        () => _parser.parse(rawValue: decodedValue, format: barcode.format),
       );
 
       Rect? boundingBox;
@@ -298,6 +280,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
             parsed: parsed,
             boundingBox: boundingBox,
             imageData: image,
+            rawBytes: rawBytes,
           ),
           maxFrameCount: _maxFrameCount,
           minFrameCount: _defaultFrameCount,
@@ -309,39 +292,17 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
             parsed: parsed,
             boundingBox: boundingBox,
             imageData: image,
+            rawBytes: rawBytes,
           ),
           lastSeen: now,
         );
       }
     }
 
-    // 即時更新 AR overlay
+    // 更新震動回饋
     _updateDetectedCodesFromAccumulator();
 
-    // AR Mode: 根據設定使用 1 秒或 2 秒後固定背景，讓用戶點選碼
-    if (_multiCodeMode) {
-      // 把穩定的碼加入 buffer
-      final stableCodes = _frameAccumulator.entries
-          .where((e) => e.value.frameCount >= _defaultFrameCount)
-          .toList();
-      for (final entry in stableCodes) {
-        if (!_multiCodeBuffer.containsKey(entry.key)) {
-          _multiCodeBuffer[entry.key] = entry.value.code;
-        }
-      }
-
-      // 根據是否重掃決定累積時間（1 秒或 2 秒）
-      final window = _useExtendedAccumulationTime
-          ? _extendedAccumulationWindow
-          : _accumulationWindow;
-      _accumulationTimer ??= Timer(window, () {
-        _accumulationTimer = null;
-        _pauseArModeWithBackground();
-      });
-      return;
-    }
-
-    // Single Mode: 兩層 Timer 設計
+    // 兩層 Timer 設計
     // 1. fallback Timer（1 秒）：開始掃描時啟動，ML Kit 掃不到時 fallback
     // 2. detection Timer（200ms）：偵測到碼時啟動，等相機穩定
     _fallbackTimer ??= Timer(const Duration(seconds: 1), () {
@@ -361,49 +322,25 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   }
 
   void _updateDetectedCodesFromAccumulator() {
-    // 顯示所有累積的碼，包含幀數資訊
-    final newCodes = _frameAccumulator.values
-        .map((acc) => acc.code.copyWith(frameCount: acc.frameCount))
-        .toList();
-
-    final hasNewStableCode = newCodes.any((c) =>
-        c.frameCount == _defaultFrameCount &&
+    // 掃到穩定碼時給震動（聲音留給結果顯示）
+    final hasNewStableCode = _frameAccumulator.values.any((acc) =>
+        acc.frameCount == _defaultFrameCount &&
         !_detectedCodes.any((old) =>
-            old.parsed.rawValue == c.parsed.rawValue &&
+            old.parsed.rawValue == acc.code.parsed.rawValue &&
             old.frameCount >= _defaultFrameCount));
 
-    // 掃到穩定碼時給震動（聲音留給結果顯示）
     if (hasNewStableCode) {
       final settings = context.read<SettingsProvider>();
       if (settings.vibration) {
         HapticFeedback.mediumImpact();
       }
     }
-
-    // AR 模式才需要即時更新 overlay，標準模式不需要
-    if (_multiCodeMode) {
-      final oldKeys = _detectedCodes.map((c) => c.parsed.rawValue).toSet();
-      final newKeys = newCodes.map((c) => c.parsed.rawValue).toSet();
-      if (!_setEquals(oldKeys, newKeys) || hasNewStableCode) {
-        setState(() {
-          _detectedCodes = newCodes;
-        });
-      }
-    }
   }
 
-  bool _setEquals<T>(Set<T> a, Set<T> b) {
-    if (a.length != b.length) return false;
-    for (final item in a) {
-      if (!b.contains(item)) return false;
-    }
-    return true;
-  }
-
-  /// Single Mode: 累積後 + ZXing 補掃，顯示結果
+  /// 累積後 + ZXing 補掃，顯示結果
   Future<void> _stopAndShowResults() async {
-    // 避免競態條件：如果已暫停、正在處理、在 AR 模式、或 widget 已卸載，直接返回
-    if (_isPaused || _isProcessing || _multiCodeMode || !mounted) return;
+    // 避免競態條件：如果已暫停、正在處理、或 widget 已卸載，直接返回
+    if (_isPaused || _isProcessing || !mounted) return;
 
     // 取得 ML Kit 累積的穩定碼
     final mlKitCodes = _frameAccumulator.entries
@@ -468,80 +405,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _toggleMultiCodeMode() {
-    // If paused, resume scanning first
-    // 切換模式時重置所有狀態
-    _isPaused = false;
-    _pausedBackgroundImage = null;
-    _detectedCodes = [];
-    _frameAccumulator.clear();
-    _parseCache.clear();
-    _accumulationTimer?.cancel();
-    _accumulationTimer = null;
-    _detectionTimer?.cancel();
-    _detectionTimer = null;
-    _fallbackTimer?.cancel();
-    _fallbackTimer = null;
-    _multiCodeBuffer.clear();
-    _arSelectedCode = null;
-    _arVerticalOffset = 0.0; // 重置垂直偏移
-    _torchOn = false; // 重置手電筒狀態
-    _useExtendedAccumulationTime = false; // 重置延長時間標記
-
-    // 無條件重新啟動相機（避免狀態不一致導致黑屏）
-    _controller?.start();
-
-    setState(() {
-      _multiCodeMode = !_multiCodeMode;
-    });
-  }
-
-  void _confirmMultiCodeScan() {
-    if (_multiCodeBuffer.isEmpty) return;
-
-    final codes = _multiCodeBuffer.values.toList();
-    _pauseWithBackground(codes.first.imageData);
-
-    if (codes.length == 1) {
-      _showSingleResult(codes.first);
-    } else {
-      _showMultiCodeSheet();
-    }
-  }
-
-  void _clearMultiCodeBuffer() {
-    setState(() {
-      _multiCodeBuffer.clear();
-      _detectedCodes = [];
-    });
-  }
-
-  /// AR 模式重掃：使用延長的 2 秒累積時間，清除舊結果重新偵測
-  void _rescanArMode() {
-    if (!_multiCodeMode) return;
-
-    // 設為延長時間模式（本次 AR session 內維持）
-    _useExtendedAccumulationTime = true;
-
-    // 清除所有狀態，重新掃描
-    _isPaused = false;
-    _pausedBackgroundImage = null;
-    _frameAccumulator.clear();
-    _parseCache.clear();
-    _accumulationTimer?.cancel();
-    _accumulationTimer = null;
-    _arSelectedCode = null;
-    _torchOn = false; // 相機重啟後手電筒會關閉
-
-    // 重新啟動相機
-    _controller?.start();
-
-    setState(() {
-      _multiCodeBuffer.clear(); // 清除之前的結果（讓「發現 X 個」歸零）
-      _detectedCodes = []; // 清除 AR overlay 顯示
-    });
-  }
-
   Future<void> _handleContinuousScan(List<DetectedCode> codes) async {
     // Filter out recently scanned codes (within 5 seconds)
     final newCodes = codes.where((c) => !_recentlyScanned.contains(c.parsed.rawValue)).toList();
@@ -602,30 +465,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// AR Mode: 選擇碼並顯示 inline 結果卡片（可切換）
-  void _selectArCode(DetectedCode code) async {
-    // 智能對焦到選中的 barcode（可能改善截圖品質）
-    await _focusOnBarcode(code);
-
-    // 固定背景
-    _pauseWithBackground(code.imageData);
-
-    // 自動儲存
-    await _saveCodeIfNotDuplicate(code);
-
-    if (!mounted) return;
-
-    // 播放聲音
-    final settings = context.read<SettingsProvider>();
-    if (settings.sound) {
-      _playBeep();
-    }
-
-    setState(() {
-      _arSelectedCode = code;
-    });
-  }
-
   void _showSingleResult(DetectedCode code) async {
     // Auto-save (skip if duplicate of recent 10)
     await _saveCodeIfNotDuplicate(code);
@@ -678,8 +517,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   void _resumeScanning() {
     if (mounted) {
       // 先取消所有 Timer 避免競態條件
-      _accumulationTimer?.cancel();
-      _accumulationTimer = null;
       _detectionTimer?.cancel();
       _detectionTimer = null;
       _fallbackTimer?.cancel();
@@ -689,16 +526,10 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         _isPaused = false;
         _pausedBackgroundImage = null; // Clear background image
         _detectedCodes = [];
-        _arVerticalOffset = 0.0; // 重置 AR 模式垂直偏移
         _torchOn = false; // 重置手電筒狀態（相機重啟後手電筒會關閉）
-        _useExtendedAccumulationTime = false; // 離開本次 AR session，重置為 1 秒
         // Clear accumulators when resuming
         _frameAccumulator.clear();
         _parseCache.clear(); // 新掃描週期清空 Parse Cache
-        // Clear multi-code buffer when resuming
-        if (_multiCodeMode) {
-          _multiCodeBuffer.clear();
-        }
       });
       // Resume scanner after processing is complete
       _controller?.start();
@@ -712,35 +543,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _controller?.stop();
   }
 
-  /// AR Mode: 時間到後固定背景（抓最後一幀）+ ZXing 補掃
-  Future<void> _pauseArModeWithBackground() async {
-    // 避免競態條件：如果已暫停、不在 AR 模式、或 widget 已卸載，直接返回
-    if (_isPaused || !_multiCodeMode || !mounted) return;
-
-    // 取第一個穩定碼的圖片作為背景
-    final stableCode = _multiCodeBuffer.values.firstOrNull;
-    final imageData = stableCode?.imageData;
-    _pauseWithBackground(imageData);
-
-    // 用 ZXing 補掃背景圖片（MIG 4.0 發票 ML Kit 掃不出來）
-    if (imageData != null) {
-      final zxingCodes = await _scanWithZXing(imageData);
-
-      // 合併結果：ZXing 優先（Big5 解碼更準確）
-      for (final code in zxingCodes) {
-        _multiCodeBuffer[code.parsed.rawValue] = code;
-      }
-    }
-
-    if (!mounted) return;
-
-    // 更新 detectedCodes 為 buffer 中的穩定碼
-    setState(() {
-      _detectedCodes = _multiCodeBuffer.values.toList();
-    });
-  }
-
-  /// AR Mode: ZXing 掃描背景圖片
+  /// ZXing 掃描背景圖片
   Future<List<DetectedCode>> _scanWithZXing(Uint8List imageBytes) async {
     final codes = <DetectedCode>[];
     File? tempFile;
@@ -771,15 +574,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
         final rawBytes = code.rawBytes;
 
-        // 檢查是否為台灣電子發票，用 Big5 解碼
+        // 檢查是否為台灣電子發票，智慧判斷編碼（Big5 或 UTF-8）
         String rawValue = code.text!;
         if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
           rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
-          debugPrint('AR ZXing: 台灣發票 Big5 解碼');
         }
-
-        // 跳過已掃到的（用解碼後的 rawValue 檢查）
-        if (_multiCodeBuffer.containsKey(rawValue)) continue;
 
         final parsed = _parser.parse(
           rawValue: rawValue,
@@ -1245,20 +1044,6 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 智能對焦：對焦到偵測到的 barcode 區域
-  Future<void> _focusOnBarcode(DetectedCode code) async {
-    if (code.boundingBox == null || _previewSize == null) return;
-
-    final box = code.boundingBox!;
-    final centerX = (box.left + box.width / 2) / _previewSize!.width;
-    final centerY = (box.top + box.height / 2) / _previewSize!.height;
-
-    await _setFocusPoint(Offset(
-      centerX.clamp(0.0, 1.0),
-      centerY.clamp(0.0, 1.0),
-    ));
-  }
-
   /// 處理點擊對焦（將螢幕座標轉換為正規化座標）
   Future<void> _handleTapToFocus(TapDownDetails details, Size screenSize) async {
     if (!_focusSupported) return;
@@ -1368,22 +1153,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                 return GestureDetector(
                   // 阻止 PageView 響應，讓縮放手勢優先
                   behavior: HitTestBehavior.opaque,
-                  // 點擊對焦（非 AR 模式，或 AR 模式下點擊非 barcode 區域）
+                  // 點擊對焦
                   onTapDown: _isPaused ? null : (details) {
-                    // AR 模式下，檢查是否點擊到 barcode 區域（由 AR overlay 處理）
-                    if (_multiCodeMode && _detectedCodes.isNotEmpty && _previewSize != null) {
-                      for (final code in _detectedCodes) {
-                        if (code.boundingBox != null) {
-                          final scaledBox = scaleRect(code.boundingBox!, _previewSize!, screenSize);
-                          // 擴大點擊區域（包含 overlay）
-                          final hitBox = scaledBox.inflate(50);
-                          if (hitBox.contains(details.localPosition)) {
-                            return; // 讓 AR overlay 處理
-                          }
-                        }
-                      }
-                    }
-                    // 點擊空白處對焦
                     _handleTapToFocus(details, screenSize);
                   },
                   onScaleStart: (details) {
@@ -1421,54 +1192,17 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
             ),
 
           // Paused background image (shows last frame when scanner is stopped)
-          // AR 模式下支持向上拖動
           if (_isPaused && _pausedBackgroundImage != null)
             Positioned.fill(
-              child: GestureDetector(
-                onVerticalDragUpdate: _multiCodeMode ? (details) {
-                  setState(() {
-                    // 只允許向上拖動（負值），限制最大偏移量
-                    final newOffset = _arVerticalOffset + details.delta.dy;
-                    _arVerticalOffset = newOffset.clamp(-300.0, 0.0);
-                  });
-                } : null,
-                child: Transform.translate(
-                  offset: Offset(0, _arVerticalOffset),
-                  child: Image.memory(
-                    _pausedBackgroundImage!,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true, // Prevent flicker
-                  ),
-                ),
-              ),
-            ),
-
-          // AR Overlay: 只在 AR Mode 時顯示（跟隨垂直偏移）
-          if (_multiCodeMode && _detectedCodes.isNotEmpty && _previewSize != null)
-            Transform.translate(
-              offset: Offset(0, _arVerticalOffset),
-              child: ScanArOverlay(
-                detectedCodes: _detectedCodes,
-                previewSize: _previewSize!,
-                stableFrameCount: _defaultFrameCount,
-                onCodeTap: _selectArCode,
-              ),
-            ),
-
-          // Multi-code mode indicator
-          if (_multiCodeMode)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              left: 16,
-              right: 16,
-              child: MultiCodeModeIndicator(
-                count: _multiCodeBuffer.length,
-                onClear: _clearMultiCodeBuffer,
+              child: Image.memory(
+                _pausedBackgroundImage!,
+                fit: BoxFit.cover,
+                gaplessPlayback: true, // Prevent flicker
               ),
             ),
 
           // Continuous scan counter
-          if (!_multiCodeMode && context.watch<SettingsProvider>().continuousScanMode && _continuousScanCount > 0)
+          if (context.watch<SettingsProvider>().continuousScanMode && _continuousScanCount > 0)
             Positioned(
               top: MediaQuery.of(context).padding.top + 16,
               left: 16,
@@ -1479,39 +1213,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
               ),
             ),
 
-          // Multi-code confirm bar (when in multi-code mode and has codes, but no selected code)
-          if (_multiCodeMode && _multiCodeBuffer.isNotEmpty && _arSelectedCode == null)
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 120,
-              child: MultiCodeConfirmBar(
-                count: _multiCodeBuffer.length,
-                onConfirm: _confirmMultiCodeScan,
-                onRescan: _rescanArMode,
-                isExtendedScan: _useExtendedAccumulationTime,
-              ),
-            ),
-
-          // AR Mode: 選中碼的結果卡片（不加遮罩，讓 AR overlay 可點擊切換）
-          if (_multiCodeMode && _arSelectedCode != null)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: ScanArResultCard(
-                code: _arSelectedCode!,
-                showThumbnail: context.read<SettingsProvider>().saveImage,
-                onClose: () {
-                  setState(() => _arSelectedCode = null);
-                  _resumeScanning();
-                },
-                onAction: _handleAction,
-              ),
-            ),
-
-          // Single Mode 暫停時顯示「發現 X 個」（點擊可查看全部）
-          if (!_multiCodeMode && _isPaused && _detectedCodes.isNotEmpty)
+          // 暫停時顯示「發現 X 個」（點擊可查看全部）
+          if (_isPaused && _detectedCodes.isNotEmpty)
             Positioned(
               left: 16,
               right: 16,
@@ -1529,22 +1232,19 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
               ),
             ),
 
-          // Bottom toolbar（AR 結果卡片顯示時隱藏）
-          if (!(_multiCodeMode && _arSelectedCode != null))
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: ScanBottomToolbar(
-                onGalleryTap: _pickFromGallery,
-                onTorchTap: _toggleTorch,
-                onArModeTap: _toggleMultiCodeMode,
-                onInvertModeTap: _toggleInvertMode,
-                isTorchOn: _torchOn,
-                isArModeActive: _multiCodeMode,
-                isInvertModeActive: _invertMode,
-              ),
+          // Bottom toolbar
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ScanBottomToolbar(
+              onGalleryTap: _pickFromGallery,
+              onTorchTap: _toggleTorch,
+              onInvertModeTap: _toggleInvertMode,
+              isTorchOn: _torchOn,
+              isInvertModeActive: _invertMode,
             ),
+          ),
         ],
       ),
     );

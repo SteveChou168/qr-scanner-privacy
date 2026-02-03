@@ -20,7 +20,20 @@ import '../../services/taiwan_invoice_decoder.dart';
 import '../../services/photo_scanner_utils.dart';
 import 'scan_models.dart';
 import 'scan_action_buttons.dart';
-import 'scan_ar_overlay.dart';
+
+/// Get color for semantic type
+Color _getTypeColor(SemanticType type) {
+  return switch (type) {
+    SemanticType.url => Colors.blue,
+    SemanticType.email => Colors.orange,
+    SemanticType.wifi => Colors.purple,
+    SemanticType.isbn => Colors.brown,
+    SemanticType.vcard => Colors.teal,
+    SemanticType.sms => Colors.pink,
+    SemanticType.geo => Colors.indigo,
+    SemanticType.text => Colors.grey,
+  };
+}
 
 /// Gallery/photo scan mode widget
 class ScanGalleryMode extends StatefulWidget {
@@ -160,11 +173,11 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
 
         final rawBytes = photoBarcode.barcode.rawBytes;
 
-        // 檢查是否為台灣電子發票，用 Big5 解碼
+        // 檢查是否為台灣電子發票，智慧判斷編碼（Big5 或 UTF-8）
         String decodedValue = rawValue;
         if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
           decodedValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
-          debugPrint('ML Kit: 台灣發票 Big5 解碼');
+          debugPrint('ML Kit: 台灣發票解碼完成');
         }
 
         final parsed = widget.parser.parse(
@@ -296,11 +309,11 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
 
     final rawBytes = code.rawBytes;
 
-    // 檢查是否為台灣電子發票，用 Big5 解碼
+    // 檢查是否為台灣電子發票，智慧判斷編碼（Big5 或 UTF-8）
     String rawValue = code.text!;
     if (TaiwanInvoiceDecoder.isTaiwanInvoice(rawValue, rawBytes)) {
       rawValue = TaiwanInvoiceDecoder.getDecodedText(rawBytes, rawValue);
-      debugPrint('ZXing: 台灣發票 Big5 解碼');
+      debugPrint('ZXing: 台灣發票解碼完成');
     }
 
     // 已存在則跳過
@@ -425,6 +438,21 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
                 child: Image.memory(
                   widget.imageBytes,
                   fit: BoxFit.contain,
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    if (wasSynchronouslyLoaded || frame != null) {
+                      return child;
+                    }
+                    // 圖片解碼中，顯示佔位
+                    return Container(
+                      color: Colors.black,
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                          color: Colors.white54,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -554,7 +582,7 @@ class _ScanGalleryModeState extends State<ScanGalleryMode> {
                     color: Colors.black.withAlpha(200),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: getTypeColor(code.parsed.semanticType),
+                      color: _getTypeColor(code.parsed.semanticType),
                       width: 2,
                     ),
                   ),
