@@ -74,7 +74,8 @@ android {
                 "proguard-rules.pro"
             )
 
-            // Skip native debug symbol stripping (workaround for WSL2)
+            // WSL2 cannot run Windows NDK strip.exe, disable auto-stripping
+            // Debug symbols will be generated manually after build
             ndk {
                 debugSymbolLevel = "NONE"
             }

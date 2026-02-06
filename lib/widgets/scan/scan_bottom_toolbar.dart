@@ -7,17 +7,17 @@ import '../../app_text.dart';
 class ScanBottomToolbar extends StatelessWidget {
   final VoidCallback onGalleryTap;
   final VoidCallback onTorchTap;
-  final VoidCallback onArModeTap;
+  final VoidCallback? onInvertModeTap;
   final bool isTorchOn;
-  final bool isArModeActive;
+  final bool isInvertModeActive;
 
   const ScanBottomToolbar({
     super.key,
     required this.onGalleryTap,
     required this.onTorchTap,
-    required this.onArModeTap,
+    this.onInvertModeTap,
     this.isTorchOn = false,
-    this.isArModeActive = false,
+    this.isInvertModeActive = false,
   });
 
   @override
@@ -43,6 +43,14 @@ class ScanBottomToolbar extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
+              // Invert mode button (leftmost for left thumb)
+              if (onInvertModeTap != null)
+                _ToolButton(
+                  icon: Icons.invert_colors,
+                  label: AppText.invertMode,
+                  onTap: onInvertModeTap!,
+                  isActive: isInvertModeActive,
+                ),
               _ToolButton(
                 icon: Icons.photo_library,
                 label: AppText.toolGallery,
@@ -53,12 +61,6 @@ class ScanBottomToolbar extends StatelessWidget {
                 label: AppText.toolFlash,
                 onTap: onTorchTap,
                 isActive: isTorchOn,
-              ),
-              _ToolButton(
-                icon: Icons.grid_view_rounded,
-                label: AppText.arMode,
-                onTap: onArModeTap,
-                isActive: isArModeActive,
               ),
             ],
           ),

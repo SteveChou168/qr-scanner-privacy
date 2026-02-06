@@ -234,6 +234,9 @@ class GrowthService extends ChangeNotifier {
     // Determine new CP balance (reset if year completed)
     final newCpBalance = completedYear != null ? 0.0 : _state.cpBalance;
 
+    // Replenish challenge quota to 5 if below
+    final newChallengeQuota = _state.challengeQuota < 5 ? 5 : _state.challengeQuota;
+
     // Update state (reset daily CP counters for new day)
     _state = _state.copyWith(
       totalDays: newTotalDays,
@@ -248,6 +251,7 @@ class GrowthService extends ChangeNotifier {
       todayAdCpCount: 0,
       todayScannedCodesJson: '[]',
       todayForgeCpCount: 0,
+      challengeQuota: newChallengeQuota,
     );
 
     await _repository!.saveState(_state);
@@ -552,6 +556,91 @@ class GrowthService extends ChangeNotifier {
     _state = _state.copyWith(spinnerHighRpm: rpm);
     await _repository!.saveState(_state);
     notifyListeners();
+  }
+
+  /// All-time high score for challenge mode (legacy)
+  int get spinnerHighScore => _state.spinnerHighScore;
+
+  /// Update spinner challenge high score if new record (legacy)
+  Future<void> updateSpinnerHighScore(int score) async {
+    if (!_isInitialized || _repository == null) return;
+    if (score <= _state.spinnerHighScore) return;
+
+    _state = _state.copyWith(spinnerHighScore: score);
+    await _repository!.saveState(_state);
+    notifyListeners();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Challenge Mode System (TOP 5 + Quota)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Current challenge quota
+  int get challengeQuota => _state.challengeQuota;
+
+  /// Whether user can start a challenge
+  bool get canChallenge => _state.canChallenge;
+
+  /// TOP 5 challenge scores
+  List<ChallengeScoreRecord> get challengeScores => _state.challengeScores;
+
+  /// Use one challenge quota (call when starting challenge)
+  Future<bool> useChallengeQuota() async {
+    if (!_isInitialized || _repository == null) return false;
+    if (_state.challengeQuota <= 0) return false;
+
+    _state = _state.copyWith(challengeQuota: _state.challengeQuota - 1);
+    await _repository!.saveState(_state);
+    notifyListeners();
+    return true;
+  }
+
+  /// Add challenge quota from watching ad (+5)
+  Future<void> addChallengeQuotaFromAd() async {
+    if (!_isInitialized || _repository == null) return;
+
+    _state = _state.copyWith(challengeQuota: _state.challengeQuota + 5);
+    await _repository!.saveState(_state);
+    notifyListeners();
+  }
+
+  /// Submit a challenge score, updates TOP 5 if qualified
+  /// Returns the rank (1-5) if made it to TOP 5, null otherwise
+  Future<int?> submitChallengeScore(int score) async {
+    if (!_isInitialized || _repository == null) return null;
+
+    final currentScores = List<ChallengeScoreRecord>.from(_state.challengeScores);
+    final newRecord = ChallengeScoreRecord(
+      score: score,
+      timestamp: DateTime.now(),
+    );
+
+    // Add new score and sort descending
+    currentScores.add(newRecord);
+    currentScores.sort((a, b) => b.score.compareTo(a.score));
+
+    // Keep only TOP 5
+    if (currentScores.length > 5) {
+      currentScores.removeRange(5, currentScores.length);
+    }
+
+    // Check if new score made it to TOP 5
+    final rank = currentScores.indexWhere((r) =>
+        r.score == newRecord.score &&
+        r.timestamp == newRecord.timestamp);
+    final madeTop5 = rank >= 0 && rank < 5;
+
+    // Encode and save
+    final scoresJson = jsonEncode(currentScores.map((r) => r.toJson()).toList());
+    _state = _state.copyWith(
+      challengeScoresJson: scoresJson,
+      // Also update legacy high score for backwards compatibility
+      spinnerHighScore: currentScores.isNotEmpty ? currentScores.first.score : 0,
+    );
+    await _repository!.saveState(_state);
+    notifyListeners();
+
+    return madeTop5 ? rank + 1 : null; // Return 1-based rank
   }
 
   /// Apply bonus days from CP conversion.

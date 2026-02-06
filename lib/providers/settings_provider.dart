@@ -9,12 +9,10 @@ import '../services/language_service.dart';
 class SettingsProvider extends ChangeNotifier {
   static const _keyVibration = 'vibration';
   static const _keySound = 'sound';
-  static const _keyAutoOpenUrl = 'auto_open_url';
   static const _keyUrlOpenMode = 'url_open_mode';
   static const _keySaveImage = 'save_image';
   static const _keySaveLocation = 'save_location';
   static const _keyThemeMode = 'theme_mode';
-  static const _keyContinuousScan = 'continuous_scan';
   static const _keyShowGrowthCard = 'show_growth_card';
   static const _keyShowRewardPopups = 'show_reward_popups';
 
@@ -40,12 +38,6 @@ class SettingsProvider extends ChangeNotifier {
   bool get sound => _prefs.getBool(_keySound) ?? true;
   set sound(bool v) {
     _prefs.setBool(_keySound, v);
-    notifyListeners();
-  }
-
-  bool get autoOpenUrl => _prefs.getBool(_keyAutoOpenUrl) ?? false;
-  set autoOpenUrl(bool v) {
-    _prefs.setBool(_keyAutoOpenUrl, v);
     notifyListeners();
   }
 
@@ -101,12 +93,8 @@ class SettingsProvider extends ChangeNotifier {
   /// 目前選擇的主題色 ID
   String get themeColorId => RewardService.instance.selectedThemeColorId;
 
-  // Continuous Scan Mode
-  bool get continuousScanMode => _prefs.getBool(_keyContinuousScan) ?? false;
-  set continuousScanMode(bool v) {
-    _prefs.setBool(_keyContinuousScan, v);
-    notifyListeners();
-  }
+  // Continuous Scan Mode - 功能已停用，永遠返回 false
+  bool get continuousScanMode => false;
 
   // ============ Growth System ============
 

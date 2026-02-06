@@ -139,6 +139,111 @@ Growth system progression unlocks theme colors and increases history record limi
 | Y3 M10 | 44,000 | Module 10 |
 | Y3 Complete | **50,000** | Year 3 done |
 
+---
+
+# Cyber Workshop (Easter Egg)
+
+A hidden full-screen pomodoro timer accessible from the Growth Card.
+
+## Key File
+
+| File | Purpose |
+|------|---------|
+| `lib/growth/ui/cyber_workshop/workshop_view.dart` | Full-screen forge timer with gravity lock |
+
+## Access
+
+Long-press the current part emoji in CyberForgeCard to enter the workshop.
+
+## Features
+
+### Forge Timer (15 min Pomodoro)
+- Tap center emoji to start 15-minute timer
+- Double-tap to pause/resume
+- Long-press to cancel
+- Tap time display to toggle visibility
+- Earns **0.2 CP per completion** (max 1.0 CP / 5 sessions per day)
+
+### Screen Rotation
+- **Only this screen** allows landscape mode (rest of app is portrait-locked)
+- Uses `SystemChrome.setPreferredOrientations` in `initState`/`dispose`
+- Adaptive layouts for portrait and landscape
+
+### Gravity Lock (Easter Egg within Easter Egg)
+The center emoji can act like a compass, always pointing down regardless of device rotation.
+
+| State | Button | Behavior |
+|-------|--------|----------|
+| Unlocked | `🔓 LOCK` | Emoji static |
+| Locked | `🔒 LOCKED` | Emoji rotates to stay "down" via accelerometer |
+
+**Implementation:**
+```dart
+// Uses sensors_plus package
+accelerometerEventStream(samplingPeriod: Duration(milliseconds: 50))
+  .listen((event) {
+    final angle = math.atan2(event.x, event.y);
+    setState(() => _deviceAngle = angle);
+  });
+
+// Applied to emoji
+Transform.rotate(
+  angle: _isGravityLocked ? _deviceAngle : 0.0,
+  child: Text(emoji),
+)
+```
+
+**Battery Optimization:**
+- Only active when user explicitly enables (tap LOCK button)
+- Auto-unlocks when:
+  - App goes to background (`AppLifecycleState.paused/inactive`)
+  - User leaves the screen (`dispose`)
+- Sampling rate: 20Hz (balanced smoothness vs battery)
+
+### Fire Ambience Sound (Another Easter Egg)
+Fireplace/forge crackling loop for immersive focus sessions.
+
+| State | Button | Behavior |
+|-------|--------|----------|
+| Off | `🔥` (dim) | No sound |
+| On | `🔥 FORGE` (animated glow) | Looping fire sound at 30% volume |
+
+**Visual Effects when On:**
+- Fire emoji scales/pulses (0.95x ~ 1.05x)
+- Button border color flickers (orange ↔ yellow)
+- Dual glow shadow (orange outer + yellow inner)
+- Flicker intensity varies with animation
+
+**Implementation:**
+```dart
+// Uses audioplayers package
+await _firePlayer!.setReleaseMode(ReleaseMode.loop);
+await _firePlayer!.setVolume(0.3);  // Default: not too loud
+await _firePlayer!.play(AssetSource('sounds/fire_loop.mp3'));
+```
+
+**Auto-pause/resume:**
+- Pauses when app goes to background
+- Resumes when app returns to foreground (if was playing)
+- Stops completely when leaving screen
+
+**Required Asset:**
+- `assets/sounds/fire_loop.mp3` - Fireplace/forge crackling loop
+
+## UI Layout
+
+| Orientation | Layout |
+|-------------|--------|
+| Portrait | Status (top-left), CP display (top-right), Forge center, Lock (bottom-left), Fire (bottom-right) |
+| Landscape | Row: [Status + CP + Lock + Fire] - [Forge] - [Status text] |
+
+## Dependencies
+
+- `sensors_plus: ^6.1.1` - Accelerometer access for gravity lock
+- `audioplayers: ^6.5.0` - Fire ambience loop playback (already in project)
+
+---
+
 ## Dev Tools
 
 Settings page includes testing tools:

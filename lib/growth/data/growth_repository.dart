@@ -108,6 +108,21 @@ class GrowthRepository {
         'ALTER TABLE cyber_growth_state ADD COLUMN spinner_high_rpm INTEGER DEFAULT 0',
       );
     }
+    if (!columns.contains('spinner_high_score')) {
+      await _db.execute(
+        'ALTER TABLE cyber_growth_state ADD COLUMN spinner_high_score INTEGER DEFAULT 0',
+      );
+    }
+    if (!columns.contains('challenge_scores_json')) {
+      await _db.execute(
+        "ALTER TABLE cyber_growth_state ADD COLUMN challenge_scores_json TEXT DEFAULT '[]'",
+      );
+    }
+    if (!columns.contains('challenge_quota')) {
+      await _db.execute(
+        'ALTER TABLE cyber_growth_state ADD COLUMN challenge_quota INTEGER DEFAULT 5',
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

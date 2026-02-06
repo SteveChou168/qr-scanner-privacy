@@ -51,7 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // Easter egg: Open cyber workshop (hidden pomodoro timer)
     Navigator.of(context).push(
       PageRouteBuilder(
-        opaque: false,
+        opaque: true,
         pageBuilder: (_, __, ___) => const CyberWorkshopView(),
         transitionsBuilder: (_, animation, __, child) {
           return FadeTransition(
@@ -126,22 +126,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (v) => settings.sound = v,
               ),
               SwitchListTile(
-                title: Text(AppText.settingsAutoOpenUrl),
-                subtitle: Text(AppText.settingsAutoOpenUrlDesc),
-                value: settings.autoOpenUrl,
-                onChanged: (v) => settings.autoOpenUrl = v,
-              ),
-              SwitchListTile(
                 title: Text(AppText.settingsUseExternalBrowser),
                 subtitle: Text(AppText.settingsUseExternalBrowserDesc),
                 value: settings.useExternalBrowser,
                 onChanged: (v) => settings.useExternalBrowser = v,
-              ),
-              SwitchListTile(
-                title: Text(AppText.settingsContinuousScan),
-                subtitle: Text(AppText.settingsContinuousScanDesc),
-                value: settings.continuousScanMode,
-                onChanged: (v) => settings.continuousScanMode = v,
               ),
 
               const Divider(),

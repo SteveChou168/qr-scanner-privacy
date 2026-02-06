@@ -34,6 +34,7 @@ UI (screens/) -> Widgets (widgets/) -> Providers (providers/) -> Services (servi
 | `lib/services/barcode_parser.dart` | Parses barcodes and determines semantic type |
 | `lib/screens/scan_screen.dart` | Main scanner with AR Mode support via `mobile_scanner` |
 | `lib/widgets/scan/scan_widgets.dart` | Barrel file for all scan-related widgets (see below) |
+| `lib/growth/ui/cyber_workshop/workshop_view.dart` | Easter egg: full-screen pomodoro timer with gravity lock |
 
 ### Scan Widgets Structure
 

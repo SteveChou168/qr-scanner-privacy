@@ -120,6 +120,14 @@ class _GeneratorScreenState extends State<GeneratorScreen>
     }
   }
 
+  /// 根據額度取得 Chip 圖標顏色
+  Color _getQuotaColor(int quota) {
+    if (quota >= 4) return const Color(0xFF00D4FF); // 電光藍
+    if (quota == 3) return Colors.amber;            // 金黃
+    if (quota >= 1) return Colors.orange;           // 橘色
+    return Colors.grey.shade600;                    // 灰黑
+  }
+
   Future<void> _onQuotaChipTapped() async {
     final canWatch = await _adService.canWatchAdProactively();
 
@@ -145,12 +153,12 @@ class _GeneratorScreenState extends State<GeneratorScreen>
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(AppText.adGetExtraQuotaTitle),
+        title: Center(child: Text(AppText.adGetExtraQuotaTitle)),
         content: Text(AppText.adGetExtraQuotaMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(AppText.dialogCancel),
+            child: Text(AppText.adWatchLater),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -278,6 +286,28 @@ class _GeneratorScreenState extends State<GeneratorScreen>
     final needsAd = await _adService.needsToWatchAd();
 
     if (!needsAd) {
+      // 有剩餘額度，顯示使用確認對話框
+      if (!mounted) return false;
+      final confirmUse = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(AppText.adUseConfirmTitle),
+          content: Text(AppText.adUseConfirmMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(AppText.adUseConfirmNo),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(AppText.adUseConfirmYes),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmUse != true) return false;
+
       await _adService.useQuota();
       await _loadQuota();
       return true;
@@ -515,31 +545,16 @@ class _GeneratorScreenState extends State<GeneratorScreen>
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: ActionChip(
               avatar: Icon(
-                Icons.star,
+                Icons.bolt,
                 size: 18,
-                color: _remainingQuota > 0
-                    ? colorScheme.primary
-                    : colorScheme.error,
+                color: _getQuotaColor(_remainingQuota),
               ),
-              label: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    AppText.adRemainingQuota(_remainingQuota),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _remainingQuota > 0
-                          ? colorScheme.onSurfaceVariant
-                          : colorScheme.error,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.add_circle_outline,
-                    size: 16,
-                    color: colorScheme.primary,
-                  ),
-                ],
+              label: Text(
+                AppText.adRemainingQuota(_remainingQuota),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
               backgroundColor: colorScheme.surfaceContainerHighest,
               side: BorderSide.none,

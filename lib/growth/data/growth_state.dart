@@ -59,6 +59,15 @@ class GrowthState {
   /// All-time high RPM record for fidget spinner
   final int spinnerHighRpm;
 
+  /// All-time high score for spinner challenge mode (legacy, use challengeScoresJson for TOP 5)
+  final int spinnerHighScore;
+
+  /// TOP 5 challenge scores JSON: [{"score": 12345, "timestamp": "2026-02-06T14:32:00"}, ...]
+  final String challengeScoresJson;
+
+  /// Current challenge quota (accumulates, daily replenish to 5 if below)
+  final int challengeQuota;
+
   const GrowthState({
     this.totalDays = 0,
     this.currentYear = 1,
@@ -74,6 +83,9 @@ class GrowthState {
     this.todayScannedCodesJson = '[]',
     this.todayForgeCpCount = 0,
     this.spinnerHighRpm = 0,
+    this.spinnerHighScore = 0,
+    this.challengeScoresJson = '[]',
+    this.challengeQuota = 5,
   });
 
   /// Creates initial state for a new user.
@@ -110,6 +122,9 @@ class GrowthState {
       todayScannedCodesJson: json['today_scanned_codes_json'] as String? ?? '[]',
       todayForgeCpCount: json['today_forge_cp_count'] as int? ?? 0,
       spinnerHighRpm: json['spinner_high_rpm'] as int? ?? 0,
+      spinnerHighScore: json['spinner_high_score'] as int? ?? 0,
+      challengeScoresJson: json['challenge_scores_json'] as String? ?? '[]',
+      challengeQuota: json['challenge_quota'] as int? ?? 5,
     );
   }
 
@@ -130,6 +145,9 @@ class GrowthState {
       'today_scanned_codes_json': todayScannedCodesJson,
       'today_forge_cp_count': todayForgeCpCount,
       'spinner_high_rpm': spinnerHighRpm,
+      'spinner_high_score': spinnerHighScore,
+      'challenge_scores_json': challengeScoresJson,
+      'challenge_quota': challengeQuota,
     };
   }
 
@@ -149,6 +167,9 @@ class GrowthState {
     String? todayScannedCodesJson,
     int? todayForgeCpCount,
     int? spinnerHighRpm,
+    int? spinnerHighScore,
+    String? challengeScoresJson,
+    int? challengeQuota,
   }) {
     return GrowthState(
       totalDays: totalDays ?? this.totalDays,
@@ -165,6 +186,9 @@ class GrowthState {
       todayScannedCodesJson: todayScannedCodesJson ?? this.todayScannedCodesJson,
       todayForgeCpCount: todayForgeCpCount ?? this.todayForgeCpCount,
       spinnerHighRpm: spinnerHighRpm ?? this.spinnerHighRpm,
+      spinnerHighScore: spinnerHighScore ?? this.spinnerHighScore,
+      challengeScoresJson: challengeScoresJson ?? this.challengeScoresJson,
+      challengeQuota: challengeQuota ?? this.challengeQuota,
     );
   }
 
@@ -264,6 +288,31 @@ class GrowthState {
     } catch (_) {
       return {};
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Challenge Mode Computed Properties
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Get TOP 5 challenge scores as list of records
+  List<ChallengeScoreRecord> get challengeScores {
+    try {
+      final list = jsonDecode(challengeScoresJson) as List;
+      return list
+          .map((e) => ChallengeScoreRecord.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Whether user has challenge quota remaining
+  bool get canChallenge => challengeQuota > 0;
+
+  /// Get the highest challenge score (TOP 1)
+  int get topChallengeScore {
+    final scores = challengeScores;
+    return scores.isEmpty ? 0 : scores.first.score;
   }
 
   @override
@@ -419,4 +468,29 @@ class CpResult {
 
   /// Whether the operation was successful
   bool get isSuccess => status == CpResultStatus.success;
+}
+
+/// A single challenge score record with timestamp.
+class ChallengeScoreRecord {
+  final int score;
+  final DateTime timestamp;
+
+  const ChallengeScoreRecord({
+    required this.score,
+    required this.timestamp,
+  });
+
+  factory ChallengeScoreRecord.fromJson(Map<String, dynamic> json) {
+    return ChallengeScoreRecord(
+      score: json['score'] as int? ?? 0,
+      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'score': score,
+      'timestamp': timestamp.toIso8601String(),
+    };
+  }
 }

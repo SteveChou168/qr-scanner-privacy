@@ -85,11 +85,13 @@ class _IconItem extends StatelessWidget {
   // 銀色（用於深色品牌在暗色模式的外框）
   static const _silverColor = Color(0xFFB0B0B0);
 
-  /// 檢查顏色是否太暗（亮度低於閾值）
+  /// 檢查顏色是否太暗（接近純黑）
   bool _isDarkColor(Color c) {
     // 計算相對亮度 (0.0 = 黑, 1.0 = 白)
+    // 閾值 0.05：只有接近純黑的顏色才視為太暗
+    // 避免飽和藍/紫色（如 LinkedIn、Discord）被誤判
     final luminance = c.computeLuminance();
-    return luminance < 0.15; // 閾值：亮度 < 15% 視為太暗
+    return luminance < 0.05;
   }
 
   @override
