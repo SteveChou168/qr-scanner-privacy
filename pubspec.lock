@@ -388,10 +388,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_zxing
-      sha256: "32e31beff338d260591d3865b01194f2ab9b8217b107f8ec50d0b77628507b7f"
+      sha256: dbcd89da2c9aa84f48d7d7e1ba436825f8656a69b142abb7bcdb7c2d9c22d48c
       url: "https://pub.dev"
     source: hosted
-    version: "1.9.1"
+    version: "2.2.1"
   font_awesome_flutter:
     dependency: "direct main"
     description:
@@ -1037,6 +1037,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  sound_generator:
+    dependency: "direct main"
+    description:
+      name: sound_generator
+      sha256: cd790990631aed2460a521abc96da453758b48e252757cb8cf3c91dd8578269a
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.14"
   source_span:
     dependency: transitive
     description:

@@ -43,6 +43,7 @@ class AppText {
   static String get toolGallery => _v('相簿', 'Gallery', 'ギャラリー', 'Galería', 'Galeria', '갤러리', 'Thư viện');
   static String get toolHistory => _v('歷史', 'History', '履歴', 'Historial', 'Histórico', '기록', 'Lịch sử');
   static String get toolSettings => _v('設置', 'Settings', '設定', 'Ajustes', 'Ajustes', '설정', 'Cài đặt');
+  static String get invertMode => _v('反相', 'Invert', '反転', 'Invertir', 'Inverter', '반전', 'Đảo');
 
   // ============ Scan Screen ============
   static String get scanTitle => _v('掃描', 'Scan', 'スキャン', 'Escanear', 'Escanear', '스캔', 'Quét');
@@ -265,7 +266,7 @@ class AppText {
         '• 完全離線運作，保護隱私',
     '• Supports QR Code, barcodes, and more\n'
         '• Smart detection: URL, Email, Wi-Fi, ISBN, etc.\n'
-        '• Multi-code scanning, AR mode\n'
+        '• Multi-code scanning\n'
         '• Scan history and codex statistics\n'
         '• QR code generator\n'
         '• Growth system (3-year achievements)\n'
@@ -463,12 +464,6 @@ class AppText {
   static String get scannedCount => _v('已掃描', 'Scanned', 'スキャン済み', 'Escaneados', 'Escaneados', '스캔됨', 'Đã quét');
   static String scannedItems(int n) => _v('已掃描 $n 個', '$n items scanned', '$n件スキャン済み', '$n escaneados', '$n escaneados', '$n개 스캔됨', 'Đã quét $n mục');
 
-  // ============ AR Mode ============
-  static String get arMode => _v('AR', 'AR', 'AR', 'AR', 'AR', 'AR', 'AR');
-  static String get arModeHint => _v('對準多個條碼，按確認處理', 'Aim at multiple codes, tap confirm', '複数のコードを読み取り、確認を押す', 'Apunte a varios códigos', 'Aponte para vários códigos', '여러 코드를 스캔하고 확인', 'Quét nhiều mã, nhấn xác nhận');
-  static String get detecting => _v('偵測中...', 'Detecting...', '検出中...', 'Detectando...', 'Detectando...', '감지 중...', 'Đang phát hiện...');
-  static String arModeCollected(int n) => _v('已收集 $n 個條碼', '$n codes collected', '$n個のコードを収集', '$n códigos recopilados', '$n códigos coletados', '$n개 코드 수집', 'Đã thu thập $n mã');
-
   // ============ Charts ============
   static String get chartsTitle => _v('統計圖表', 'Statistics', '統計チャート', 'Estadísticas', 'Estatísticas', '통계', 'Thống kê');
   static String get typeDistribution => _v('類型分佈', 'Type Distribution', 'タイプ分布', 'Distribución de tipos', 'Distribuição de tipos', '유형 분포', 'Phân bố loại');
@@ -628,8 +623,8 @@ class AppText {
   // ============ Forge System (Hidden Easter Egg) ============
   static String get forgeStatus => _v('鍛造中', 'FORGING', '鍛造中', 'FORJANDO', 'FORJANDO', '단조 중', 'ĐANG RÈN');
   static String get forgeReady => _v('待機中', 'READY', '待機中', 'LISTO', 'PRONTO', '대기 중', 'SẴN SÀNG');
-  static String get forgeTapToStart => _v('點擊中央開始鍛造，長按取消', 'Tap center to forge, hold to cancel', '中央タップで鍛造、長押しで中止', 'Toca centro para forjar, mantén cancelar', 'Toque centro para forjar, segure cancelar', '중앙 탭으로 단조, 길게 눌러 취소', 'Nhấn giữa để rèn, giữ để hủy');
-  static String get forgeInProgress => _v('鍛造進行中...', 'Forging in progress...', '鍛造進行中...', 'Forjando...', 'Forjando...', '단조 진행 중...', 'Đang rèn...');
+  static String get forgeTapToStart => _v('長按開始鍛造', 'Long press to start', '長押しで鍛造開始', 'Mantén para forjar', 'Segure para forjar', '길게 눌러 시작', 'Nhấn giữ để bắt đầu');
+  static String get forgeInProgress => _v('長按結束', 'Long press to end', '長押しで終了', 'Mantén para terminar', 'Segure para terminar', '길게 눌러 종료', 'Nhấn giữ để kết thúc');
   static String get forgePaused => _v('已暫停', 'PAUSED', '一時停止', 'PAUSADO', 'PAUSADO', '일시 정지', 'TẠM DỪNG');
   static String get forgeDoubleTapResume => _v('雙擊繼續', 'Double tap to resume', 'ダブルタップで再開', 'Doble toque para continuar', 'Toque duplo para continuar', '더블탭으로 재개', 'Nhấp đúp để tiếp tục');
   static String get forgeLongPressCancel => _v('長按取消', 'Long press to cancel', '長押しでキャンセル', 'Mantén para cancelar', 'Segure para cancelar', '길게 눌러 취소', 'Nhấn giữ để hủy');
@@ -646,6 +641,43 @@ class AppText {
   static String get forgeDailyMax => _v('今日已滿', 'MAX TODAY', '本日上限', 'MÁXIMO HOY', 'MÁXIMO HOJE', '오늘 최대', 'TỐI ĐA HÔM NAY');
   static String get forgeCpLabel => _v('⚙️ 鍛造', '⚙️ FORGE', '⚙️ 鍛造', '⚙️ FORJA', '⚙️ FORJA', '⚙️ 단조', '⚙️ RÈN');
   static String get forgeHint => _v('專注 15 分鐘，注入 0.2 CP', '15 min focus → +0.2 CP', '15分集中 → +0.2 CP', '15 min enfoque → +0.2 CP', '15 min foco → +0.2 CP', '15분 집중 → +0.2 CP', '15 phút tập trung → +0.2 CP');
+
+  // Challenge Mode (Easter egg within Workshop)
+  static String get challengeStatus => _v('挑戰中', 'CHALLENGING', 'チャレンジ中', 'DESAFIANDO', 'DESAFIANDO', '도전 중', 'ĐANG THÁCH THỨC');
+  static String get challengeReady => _v('待機中', 'STANDBY', 'スタンバイ', 'EN ESPERA', 'EM ESPERA', '대기 중', 'CHỜ');
+  static String get challengeStart => _v('挑戰', 'CHALLENGE', 'チャレンジ', 'DESAFÍO', 'DESAFIO', '도전', 'THÁCH THỨC');
+  static String get challengeEnd => _v('結束', 'END', '終了', 'FIN', 'FIM', '종료', 'KẾT THÚC');
+  static String get challengeNewRecord => _v('新紀錄！', 'NEW RECORD!', '新記録！', '¡NUEVO RÉCORD!', 'NOVO RECORDE!', '신기록!', 'KỶ LỤC MỚI!');
+  static String get challengeTopScores => _v('最高分榜', 'TOP SCORES', 'ハイスコア', 'MEJORES', 'MELHORES', '최고 점수', 'ĐIỂM CAO');
+  static String get challengeNoScores => _v('尚無紀錄', 'No records yet', 'まだ記録なし', 'Sin récords', 'Sem recordes', '아직 기록 없음', 'Chưa có kỷ lục');
+  static String get challengeQuota => _v('剩餘次數', 'Remaining', '残り回数', 'Restantes', 'Restantes', '남은 횟수', 'Còn lại');
+  static String get challengeNoQuota => _v('今日次數已用盡', 'No attempts left today', '本日の回数を使い切りました', 'Sin intentos hoy', 'Sem tentativas hoje', '오늘 횟수 소진', 'Hết lượt hôm nay');
+  static String get challengeWatchAd => _v('觀看廣告 +5 次', 'Watch ad for +5', '広告視聴で+5回', 'Ver anuncio +5', 'Ver anúncio +5', '광고 보고 +5', 'Xem quảng cáo +5');
+  static String get challengeScore => _v('分數', 'SCORE', 'スコア', 'PUNTOS', 'PONTOS', '점수', 'ĐIỂM');
+  static String get challengeHighScore => _v('最高分', 'HIGH SCORE', 'ハイスコア', 'RÉCORD', 'RECORDE', '최고 점수', 'ĐIỂM CAO');
+  static String get challengeRetry => _v('再試一次', 'RETRY', 'リトライ', 'REINTENTAR', 'TENTAR', '다시 시도', 'THỬ LẠI');
+  static String get challengeExit => _v('離開', 'EXIT', '終了', 'SALIR', 'SAIR', '나가기', 'THOÁT');
+  static String get challengeDescription => _v(
+    '在限定時間內挑戰最高分數！',
+    'Challenge for the highest score in limited time!',
+    '制限時間内にハイスコアを目指せ！',
+    '¡Desafía el puntaje más alto en tiempo limitado!',
+    'Desafie a maior pontuação em tempo limitado!',
+    '제한 시간 내 최고 점수에 도전하세요!',
+    'Thách thức điểm cao nhất trong thời gian giới hạn!',
+  );
+  static String get challengeQuotaLabel => _v('剩餘次數', 'Remaining', '残り回数', 'Restantes', 'Restantes', '남은 횟수', 'Còn lại');
+  static String get challengeGo => _v('開始', 'START', 'スタート', 'INICIAR', 'INICIAR', '시작', 'BẮT ĐẦU');
+  static String get challengeQuotaAdded => _v('次數已增加', 'Attempts added', '回数が追加されました', 'Intentos añadidos', 'Tentativas adicionadas', '횟수가 추가되었습니다', 'Đã thêm lượt chơi');
+  static String get challengeTitle => _v('極速挑戰', 'Speed Challenge', 'スピードチャレンジ', 'Desafío Velocidad', 'Desafio Velocidade', '스피드 챌린지', 'Thử thách tốc độ');
+  static String get challengeQuotaUnit => _v('次', 'times', '回', 'veces', 'vezes', '회', 'lần');
+  static String get watchAd => _v('觀看廣告', 'Watch Ad', '広告を見る', 'Ver anuncio', 'Ver anúncio', '광고 보기', 'Xem quảng cáo');
+  static String get tapToStart => _v('點擊開始', 'TAP TO START', 'タップで開始', 'TOCA PARA INICIAR', 'TOQUE PARA INICIAR', '탭하여 시작', 'NHẤN ĐỂ BẮT ĐẦU');
+  static String get countdownGo => _v('開始！', 'GO!', 'GO!', '¡YA!', 'VAI!', '시작!', 'BẮT ĐẦU!');
+  static String get stopButton => _v('停止', 'STOP', 'ストップ', 'PARAR', 'PARAR', '정지', 'DỪNG');
+  static String get historyHigh => _v('歷史最高', 'HISTORY HIGH', '最高記録', 'RÉCORD', 'RECORDE', '최고 기록', 'KỶ LỤC');
+  static String get sessionHigh => _v('本次最高', 'SESSION HIGH', '今回最高', 'SESIÓN', 'SESSÃO', '이번 최고', 'LẦN NÀY');
+  static String get ok => _v('確定', 'OK', 'OK', 'OK', 'OK', '확인', 'OK');
   static String get tapToClose => _v('點擊空白處關閉', 'Tap anywhere to close', 'タップで閉じる', 'Toca afuera para cerrar', 'Toque fora para fechar', '빈 곳 탭하여 닫기', 'Nhấn chỗ trống để đóng');
 
   // ============ Rewards System ============

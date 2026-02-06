@@ -1,7 +1,7 @@
 name: qr_scanner
 description: "Offline-First QR/Barcode Scanner"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: ^3.10.7
@@ -15,7 +15,7 @@ dependencies:
   # Scanning
   mobile_scanner: ^7.1.4
   google_mlkit_barcode_scanning: ^0.14.1
-  flutter_zxing: ^1.8.0  # ZXing fallback for MIG 4.0 invoices
+  flutter_zxing: ^2.2.1  # ZXing fallback for MIG 4.0 invoices
 
   # Storage
   sqflite: ^2.3.0
@@ -42,6 +42,7 @@ dependencies:
 
   # Audio
   audioplayers: ^6.5.0
+  sound_generator: ^0.0.14
 
   # Utils
   intl: ^0.20.0
